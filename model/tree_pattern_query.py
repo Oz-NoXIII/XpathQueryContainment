@@ -30,13 +30,8 @@ class TreePatternQuery:
 	def set_nodes(self):
 		if self._frozen:
 			raise RuntimeError("Cannot modify frozen tree")
-		visited = set()
 
 		def dfs(node):
-			if node in visited:
-				return
-			visited.add(node)
-
 			self.add_node(node)
 
 			for child in node.get_children():
