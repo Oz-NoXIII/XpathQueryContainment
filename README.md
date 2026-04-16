@@ -1,1 +1,2 @@
 [![Tests & Quality Checks](https://github.com/Oz-NoXIII/XpathQueryContainment/actions/workflows/tests.yml/badge.svg)](https://github.com/Oz-NoXIII/XpathQueryContainment/actions/workflows/tests.yml)
+[![Coverage](https://raw.githubusercontent.com/Oz-NoXIII/XpathQueryContainment/badges/coverage-badge.svg)](https://github.com/Oz-NoXIII/XpathQueryContainment/actions/workflows/tests.yml)
