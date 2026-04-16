@@ -45,9 +45,28 @@ class TestTreePatternQuery(TestCase):
 		t = TPQ(n)
 		t.set_nodes()
 		assert t.get_nodes() == [n, c1, c2, d1, d2]
+		e = Qnode("F")
+		t.get_nodes().append(e)
+		assert t.get_nodes() == [n, c1, c2, d1, d2]
 		# error if we try to modify the tree after it's frozen
 		with self.assertRaises(RuntimeError):
 			t.set_nodes()
+		# error if we try to add a node after the tree is frozen
+		with self.assertRaises(RuntimeError):
+			t.add_node(Qnode("G"))
+		# error if we try to modify a node after it's frozen
+		with self.assertRaises(RuntimeError):
+			n.add_child(Qnode("H"))
+		# error if we try to modify a descendant after it's frozen
+		with self.assertRaises(RuntimeError):
+			n.add_descendant(Qnode("I"))
+
+		# error if we try to modify a child after it's frozen
+		with self.assertRaises(RuntimeError):
+			c1.add_child(Qnode("J"))
+		# error if we try to modify a child after it's frozen
+		with self.assertRaises(RuntimeError):
+			c1.add_descendant(Qnode("K"))
 
 	def test_get_labels(self):
 		n = Qnode("A")

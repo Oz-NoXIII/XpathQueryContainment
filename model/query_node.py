@@ -20,6 +20,8 @@ class QueryNode:
 		self.parent = parent
 		self.parent_edge = parent_edge  # "child" or "descendant"
 
+		self._frozen = False
+
 	def get_label(self):
 		return self.label
 
@@ -39,11 +41,19 @@ class QueryNode:
 		self.parent_edge = edge_type
 
 	def add_child(self, child):
+		if self._frozen:
+			raise RuntimeError("Cannot modify frozen node")
+		if child.parent is not None:
+			raise ValueError("Node already has a parent")
 		self.children.append(child)
 		child.set_parent(self)
 		child.set_parent_edge("child")
 
 	def add_descendant(self, descendant):
+		if self._frozen:
+			raise RuntimeError("Cannot modify frozen node")
+		if descendant.parent is not None:
+			raise ValueError("Node already has a parent")
 		self.descendants.append(descendant)
 		descendant.set_parent(self)
 		descendant.set_parent_edge("descendant")

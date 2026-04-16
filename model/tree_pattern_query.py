@@ -45,6 +45,8 @@ class TreePatternQuery:
 			for descendant in node.get_descendants():
 				dfs(descendant)
 
+			node._frozen = True
+
 		dfs(self.root)
 		self._frozen = True
 
@@ -52,10 +54,10 @@ class TreePatternQuery:
 		return self.root
 
 	def get_nodes(self):
-		return self.nodes
+		return list(self.nodes)
 
 	def get_labels(self):
-		return self.lab
+		return dict(self.lab)
 
 	def q(self, tree):
 		# TODO: implement this method to output the result of the tree pattern query for the given tree
