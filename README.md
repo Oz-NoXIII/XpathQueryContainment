@@ -1,0 +1,1 @@
+[![Tests & Quality Checks](https://github.com/Oz-NoXIII/XpathQueryContainment/actions/workflows/tests.yml/badge.svg)](https://github.com/Oz-NoXIII/XpathQueryContainment/actions/workflows/tests.yml)
