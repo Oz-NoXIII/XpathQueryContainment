@@ -49,5 +49,11 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
+          git fetch origin badges:refs/remotes/origin/badges 2>/dev/null || true
+          git checkout -B badges origin/badges 2>/dev/null || git checkout --orphan badges
+          git reset --mixed
+          cp coverage-badge.svg coverage-badge.svg.tmp
+          git rm -rf . --quiet 2>/dev/null || true
+          mv coverage-badge.svg.tmp coverage-badge.svg
           git add coverage-badge.svg
-          git diff --staged --quiet || (git commit -m "Update coverage badge [skip ci]" && git push)
+          git diff --staged --quiet || (git commit -m "Update coverage badge [skip ci]" && git push origin badges)
