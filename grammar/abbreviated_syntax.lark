@@ -11,10 +11,6 @@
 
 ?step_abbreviated: "." -> axis_self
                  | ".." -> axis_parent
-                 | "@" LAB -> axis_attribute
-                 | "@ *" -> axis_attribute
-                 | "text()" -> axis_child_text
-                 | "node()" -> axis_child_node
                  | LAB
                  | "*"
 
