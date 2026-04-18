@@ -1,6 +1,6 @@
-import os
 import re
-from lark import Lark, Transformer, UnexpectedInput
+from pathlib import Path
+from lark import Lark, UnexpectedInput
 
 AXIS = {
     "self", "descendant", "next-sibling", "following",
@@ -25,11 +25,11 @@ def detect_grammar(expression: str) -> str:
 class XPathParser:
     def __init__(self):
         # Get the grammars from files in ../grammar
-        base_path = os.path.dirname(__file__)
-        with open(os.path.join(base_path, "../grammar/syntax.lark"), "r") as f:
+        base_path = Path(__file__).parent
+        with open(base_path / "../grammar/syntax.lark", "r") as f:
             syntax = f.read()
 
-        with open(os.path.join(base_path, "../grammar/abbreviated_syntax.lark"), "r") as f:
+        with open(base_path / "../grammar/abbreviated_syntax.lark", "r") as f:
             abbreviated_syntax = f.read()
 
         self._parsers = {
@@ -40,26 +40,9 @@ class XPathParser:
     def parse(self, expression: str):
         # Decide which grammar to use
         grammar_type = detect_grammar(expression)
-        parser = self._parsers[grammar_type]
+        _parser = self._parsers[grammar_type]
         try:
-            tree = parser.parse(expression)
+            tree = _parser.parse(expression)
             return tree
         except UnexpectedInput as e:
             raise SyntaxError(f"Invalid XPath expression for {grammar_type} grammar: {e}")
-
-# ----------------------------------------------------------------------
-# Example usage
-# ----------------------------------------------------------------------
-
-if __name__ == "__main__":
-    parser = XPathParser()
-
-    # Unabbreviated examples
-    expr1 = "(descendant[((lab = person) & !?child[(lab = birthplace)])]/child[(lab = name)])"
-    tree1 = parser.parse(expr1)
-    print("Unabbreviated parse tree:\n", tree1.pretty())
-
-    # Abbreviated examples
-    expr2 = ".//person[! @birthplace ]/name"
-    tree2 = parser.parse(expr2)
-    print("\nAbbreviated parse tree:\n", tree2.pretty())
