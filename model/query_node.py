@@ -20,6 +20,7 @@ class QueryNode:
 		self.parent = parent
 		self.parent_edge = parent_edge  # "child" or "descendant"
 
+		self.output_node = False
 		self._frozen = False
 
 	def get_label(self):
@@ -57,6 +58,9 @@ class QueryNode:
 		self.descendants.append(descendant)
 		descendant.set_parent(self)
 		descendant.set_parent_edge("descendant")
+
+	def is_an_output_node(self):
+		return self.output_node
 
 	def __repr__(self):
 		return f"QueryNode({self.label})"

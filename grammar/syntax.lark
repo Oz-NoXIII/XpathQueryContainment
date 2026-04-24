@@ -4,32 +4,32 @@
       | ne -> ne
 
 ?pe: step
-   | "(" pe "/" pe ")"
-   | "(" pe "U" pe ")"
+   | "(" pe "/" pe ")" -> pe_compose
+   | "(" pe "U" pe ")" -> pe_union
 
 ?step: axis
      | step "[" ne "]"
 
 ?ne: "?" pe
    | "(" "lab" "=" LAB ")" -> lab
-   | "(" "lab" "=" "*" ")" -> lab
+   | "(" "lab" "=" "*" ")" -> wildcard
    | "(" ne "&" ne ")" -> and
    | "(" ne "|" ne ")" -> or
    | "!" ne -> not
 
 axis: "self" -> axis_self
     | "descendant" -> axis_descendant
-    | "next-sibling" -> axis_next_sibling
-    | "following" -> axis_following
+    // | "next-sibling" -> axis_next_sibling
+    // | "following" -> axis_following
     | "child" -> axis_child
-    | "descendant-or-self" -> axis_descendant_or_self
-    | "following-sibling" -> axis_following_sibling
-    | "preceding" -> axis_preceding
+    // | "descendant-or-self" -> axis_descendant_or_self
+    // | "following-sibling" -> axis_following_sibling
+    // | "preceding" -> axis_preceding
     | "parent" -> axis_parent
     | "ancestor" -> axis_ancestor
-    | "previous-sibling" -> axis_previous_sibling
-    | "ancestor-or-self" -> axis_ancestor_or_self
-    | "preceding-sibling" -> axis_preceding_sibling
+    // | "previous-sibling" -> axis_previous_sibling
+    // | "ancestor-or-self" -> axis_ancestor_or_self
+    // | "preceding-sibling" -> axis_preceding_sibling
 
 // We can expand this later to support wildcards or namespaces.
 LAB: CNAME
