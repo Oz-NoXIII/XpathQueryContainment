@@ -1,11 +1,13 @@
 // grammar/test.lark
 
 ?start: pe -> pe
-      | ne -> ne
+      | "?" pe -> ne
 
 ?pe: step
    | "(" pe "/" pe ")" -> pe_compose
+   | pe "/" pe -> pe_compose
    | "(" pe "U" pe ")" -> pe_union
+   | pe "U" pe -> pe_union
 
 ?step: axis
      | step "[" ne "]"
@@ -13,23 +15,25 @@
 ?ne: "?" pe
    | "(" "lab" "=" LAB ")" -> lab
    | "(" "lab" "=" "*" ")" -> wildcard
-   | "(" ne "&" ne ")" -> and
-   | "(" ne "|" ne ")" -> or
-   | "!" ne -> not
+   | "(" ne "&" ne ")" -> and_
+   | ne "&" ne -> and_
+   | "(" ne "|" ne ")" -> or_
+   | ne "|" ne -> or_
+   | "!" ne -> not_
 
 axis: "self" -> axis_self
     | "descendant" -> axis_descendant
-    // | "next-sibling" -> axis_next_sibling
-    // | "following" -> axis_following
     | "child" -> axis_child
-    // | "descendant-or-self" -> axis_descendant_or_self
-    // | "following-sibling" -> axis_following_sibling
-    // | "preceding" -> axis_preceding
     | "parent" -> axis_parent
     | "ancestor" -> axis_ancestor
     // | "previous-sibling" -> axis_previous_sibling
     // | "ancestor-or-self" -> axis_ancestor_or_self
     // | "preceding-sibling" -> axis_preceding_sibling
+    // | "next-sibling" -> axis_next_sibling
+    // | "following" -> axis_following
+    // | "descendant-or-self" -> axis_descendant_or_self
+    // | "following-sibling" -> axis_following_sibling
+    // | "preceding" -> axis_preceding
 
 // We can expand this later to support wildcards or namespaces.
 LAB: CNAME

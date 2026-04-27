@@ -1,9 +1,17 @@
 from unittest import TestCase
 
+from _pytest.mark import expression
+
 from model.query_node import QueryNode as Qnode
 
 
 class TestQueryNode(TestCase):
+
+	def test_set_label(self):
+		n = Qnode("A")
+		n.set_label("name")
+		assert n.get_label() == "name"
+
 	def test_get_label(self):
 		n = Qnode("A")
 		assert n.get_label() == "A"
@@ -62,6 +70,24 @@ class TestQueryNode(TestCase):
 		with self.assertRaises(ValueError):
 			m.add_child(c1)
 
+	def test_remove_child(self):
+		n = Qnode("A")
+		c1 = Qnode("B")
+		n.add_child(c1)
+
+		n._frozen = True
+		with self.assertRaises(RuntimeError):
+			n.remove_child(c1)
+
+		n._frozen = False
+		n.remove_child(c1)
+
+		assert c1.get_parent() is None
+		assert c1.parent_edge is None
+
+		with self.assertRaises(ValueError):
+			n.remove_child(c1)
+
 	def test_add_descendant(self):
 		n = Qnode("A")
 		d1 = Qnode("D")
@@ -78,6 +104,24 @@ class TestQueryNode(TestCase):
 		m = Qnode("D")
 		with self.assertRaises(ValueError):
 			m.add_descendant(d1)
+
+	def test_remove_descendant(self):
+		n = Qnode("A")
+		d1 = Qnode("B")
+		n.add_descendant(d1)
+
+		n._frozen = True
+		with self.assertRaises(RuntimeError):
+			n.remove_descendant(d1)
+
+		n._frozen = False
+		n.remove_descendant(d1)
+
+		assert d1.get_parent() is None
+		assert d1.parent_edge is None
+
+		with self.assertRaises(ValueError):
+			n.remove_descendant(d1)
 
 	def test_repr(self):
 		n = Qnode("A")
