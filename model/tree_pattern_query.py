@@ -13,7 +13,7 @@ class TreePatternQuery:
 	def __init__(self, root):
 		self.root = root
 		self.nodes = []
-		self.lab = {}
+		self.labs = {}
 		self._frozen = False
 
 	def add_node(self, node):
@@ -21,22 +21,17 @@ class TreePatternQuery:
 			raise RuntimeError("Cannot add nodes after the tree is frozen.")
 		if node not in self.nodes:
 			self.nodes.append(node)
-			# Add the label to the lab list if it's not already present
-			if node.label not in self.lab:
-				self.lab[node.label] = 1
+			# Add the label to the labs list if it's not already present
+			if node.label not in self.labs:
+				self.labs[node.label] = 1
 			else:
-				self.lab[node.label] += 1
+				self.labs[node.label] += 1
 
 	def set_nodes(self):
 		if self._frozen:
 			raise RuntimeError("Cannot modify frozen tree")
-		visited = set()
 
 		def dfs(node):
-			if node in visited:
-				return
-			visited.add(node)
-
 			self.add_node(node)
 
 			for child in node.get_children():
@@ -57,8 +52,11 @@ class TreePatternQuery:
 		return list(self.nodes)
 
 	def get_labels(self):
-		return dict(self.lab)
+		return dict(self.labs)
 
 	def q(self, tree):
 		# TODO: implement this method to output the result of the tree pattern query for the given tree
 		pass
+
+	def __repr__(self):
+		return f"TreePatternQuery(root={self.root}, nodes={self.nodes}, lab={self.labs})"

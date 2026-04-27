@@ -1,0 +1,29 @@
+?start: p
+      | n
+
+?p: s
+  | p "/" p -> axis_child
+  | p "//" p -> axis_descendant
+  | p "U" p
+
+?s: step_abbreviated
+  | s "[" n "]"
+
+?step_abbreviated: "." -> axis_self
+                 | ".." -> axis_parent
+                 | LAB
+                 | "*"
+
+?n: p
+  | LAB
+  | "*"
+  | n "&" n -> and
+  | n "|" n -> or
+  | "!" n -> not
+
+// We can expand this later to support wildcards or namespaces.
+LAB: CNAME
+
+%import common.CNAME
+%import common.WS
+%ignore WS

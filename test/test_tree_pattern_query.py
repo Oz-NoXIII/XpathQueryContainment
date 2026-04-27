@@ -82,6 +82,6 @@ class TestTreePatternQuery(TestCase):
 		t.set_nodes()
 		assert t.get_labels() == {"A": 1, "B": 1, "C": 1, "D": 1, "E": 1}
 
-	def test_output(self):
-		# TODO: implement this test once the output method is implemented
+	def test_q(self):
+		# TODO: implement this test once the q method is implemented
 		pass

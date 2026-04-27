@@ -20,10 +20,14 @@ class QueryNode:
 		self.parent = parent
 		self.parent_edge = parent_edge  # "child" or "descendant"
 
+		self.output_node = False
 		self._frozen = False
 
 	def get_label(self):
 		return self.label
+
+	def set_label(self, label):
+		self.label = label
 
 	def get_children(self):
 		return self.children
@@ -49,6 +53,15 @@ class QueryNode:
 		child.set_parent(self)
 		child.set_parent_edge("child")
 
+	def remove_child(self, child):
+		if self._frozen:
+			raise RuntimeError("Cannot modify frozen node")
+		if child.parent is None:
+			raise ValueError("Node does not have a parent")
+		self.children.remove(child)
+		child.set_parent(None)
+		child.set_parent_edge(None)
+
 	def add_descendant(self, descendant):
 		if self._frozen:
 			raise RuntimeError("Cannot modify frozen node")
@@ -57,6 +70,18 @@ class QueryNode:
 		self.descendants.append(descendant)
 		descendant.set_parent(self)
 		descendant.set_parent_edge("descendant")
+
+	def remove_descendant(self, descendant):
+		if self._frozen:
+			raise RuntimeError("Cannot modify frozen node")
+		if descendant.parent is None:
+			raise ValueError("Node does not have a parent")
+		self.descendants.remove(descendant)
+		descendant.set_parent(None)
+		descendant.set_parent_edge(None)
+
+	def is_an_output_node(self):
+		return self.output_node
 
 	def __repr__(self):
 		return f"QueryNode({self.label})"
