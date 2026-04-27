@@ -48,7 +48,7 @@ class TestXPathParser(TestCase):
 			"child",
 			"?child",
 			"child[(lab = *)]",
-			"(?child&!(lab = person))",
+			"?child[!(lab = person)]",
 			"((child/descendant)Uparent)",
 			"?(descendant[((lab = person) | ?descendant[(lab = ame)])] U self)",
 			"?( descendant[((lab = person) & !?child[(lab = birthplace)])] / child[(lab = name)] )"
