@@ -170,7 +170,6 @@ class TestExpressionTransformer(TestCase):
         tpq = self._transform(expression)
         root = tpq.get_root()
 
-        # The true root of the tree is now ancestor_node
         assert root.get_label() == "ancestor_node"
         assert len(root.get_descendants()) == 1
         parent = root.get_descendants()[0]
@@ -184,7 +183,6 @@ class TestExpressionTransformer(TestCase):
         tpq = self._transform(expression)
         root = tpq.get_root()
 
-        # The true root of the tree is now ancestor_node
         assert root.get_label() == "ancestor_node"
         assert len(root.get_descendants()) == 1
         parent = root.get_descendants()[0]

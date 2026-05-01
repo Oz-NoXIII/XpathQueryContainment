@@ -8,6 +8,7 @@ from view import TreePatternQueryVisualizer
 
 
 class TestTreePatternQueryVisualizer(TestCase):
+	# noinspection PyMethodMayBeStatic
 	def _build_sample_query(self):
 		root = QueryNode("root")
 		child = QueryNode("child")
@@ -54,7 +55,7 @@ class TestTreePatternQueryVisualizer(TestCase):
 			content = output.read_text(encoding="utf-8")
 			assert "<!doctype html>" in content.lower()
 			assert "TreePatternQuery visualisation" in content
-			assert "Requete XPath" not in content
+			assert "Requête XPath" not in content
 			assert "prefers-color-scheme: dark" in content
 			assert "--tpq-node-fill" in content
 			assert "theme-switch" in content
@@ -71,7 +72,7 @@ class TestTreePatternQueryVisualizer(TestCase):
 			visualizer.save_html(output, interactive=False, xpath_query=xpath_query)
 
 			content = output.read_text(encoding="utf-8")
-			assert "Requete XPath" in content
+			assert "Requête XPath" in content
 			assert "self[" in content
 			assert "/" in content
 			assert "child[" in content
@@ -103,7 +104,7 @@ class TestTreePatternQueryVisualizer(TestCase):
 			assert "isPinned" in content
 			assert "isFixed" in content
 			assert "isSimulationSettled" in content
-			assert "Requete XPath" in content
+			assert "Requête XPath" in content
 			assert "self[" in content
 			assert "/" in content
 			assert "child[" in content

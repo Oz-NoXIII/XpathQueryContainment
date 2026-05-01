@@ -10,6 +10,7 @@ from model.query_node import QueryNode
 from model.tree_pattern_query import TreePatternQuery
 
 
+# noinspection PyMethodMayBeStatic
 class TreePatternQueryVisualizer:
     """Render a TreePatternQuery as an SVG/HTML graph."""
 
@@ -207,32 +208,111 @@ class TreePatternQueryVisualizer:
         flush_line()
         return "\n".join(lines)
 
+    def _theme_switch_html(self) -> str:
+        return """
+        <div id="tpq-theme" class="theme-switch" role="group" aria-label="Choix du thème">
+          <span class="theme-switch-label">Thème</span>
+          <button type="button" class="theme-option" data-theme-option="light" aria-pressed="false">Clair</button>
+          <button type="button" class="theme-option" data-theme-option="dark" aria-pressed="false">Sombre</button>
+          <button type="button" class="theme-option" data-theme-option="auto" aria-pressed="false">Auto</button>
+        </div>
+        """.strip()
+
+    def _theme_switch_script(self) -> str:
+        return """
+    const themeStorageKey = 'tpq-theme';
+    const themeRoot = document.documentElement;
+    const themeButtons = Array.from(document.querySelectorAll('[data-theme-option]'));
+    const themeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    let currentTheme = 'auto';
+
+    function readStoredTheme() {
+      try {
+        const storedTheme = window.localStorage.getItem(themeStorageKey);
+        return storedTheme === 'light' || storedTheme === 'dark' || storedTheme === 'auto' ? storedTheme : 'auto';
+      } catch (error) {
+        return 'auto';
+      }
+    }
+
+    function storeTheme(theme) {
+      try {
+        window.localStorage.setItem(themeStorageKey, theme);
+      } catch (error) {
+        // Storage may be unavailable; ignore.
+      }
+    }
+
+    function syncThemeButtons(theme) {
+      themeButtons.forEach(button => {
+        const isActive = button.dataset.themeOption === theme;
+        button.setAttribute('aria-pressed', String(isActive));
+        button.classList.toggle('is-active', isActive);
+      });
+    }
+
+    function applyTheme(theme, persist = true) {
+      currentTheme = theme === 'light' || theme === 'dark' ? theme : 'auto';
+
+      if (currentTheme === 'auto') {
+        themeRoot.removeAttribute('data-theme');
+        themeRoot.style.colorScheme = 'light dark';
+      } else {
+        themeRoot.setAttribute('data-theme', currentTheme);
+        themeRoot.style.colorScheme = currentTheme;
+      }
+
+      if (persist) {
+        storeTheme(currentTheme);
+      }
+
+      syncThemeButtons(currentTheme);
+
+      if (typeof window.refreshThemeColors === 'function') {
+        window.refreshThemeColors();
+      }
+    }
+
+    window.applyTheme = applyTheme;
+
+    themeButtons.forEach(button => {
+      button.addEventListener('click', () => applyTheme(button.dataset.themeOption));
+    });
+
+    if (typeof themeMediaQuery.addEventListener === 'function') {
+      themeMediaQuery.addEventListener('change', () => {
+        if (currentTheme === 'auto') {
+          applyTheme('auto', false);
+        }
+      });
+    } else if (typeof themeMediaQuery.addListener === 'function') {
+      themeMediaQuery.addListener(() => {
+        if (currentTheme === 'auto') {
+          applyTheme('auto', false);
+        }
+      });
+    }
+
+    applyTheme(readStoredTheme(), false);
+        """.strip()
+
     def to_svg(self) -> str:
         layout = self.layout()
         positions = layout["positions"]
         width = layout["width"]
         height = layout["height"]
 
-        svg_parts = [
-            f'<svg id="tpq-svg" xmlns="http://www.w3.org/2000/svg" '
-            f'width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
-            "<defs>",
-            "<style>",
-            "text { font-family: Arial, Helvetica, sans-serif; font-size: 14px; }",
-            ".edge { stroke: var(--tpq-edge, #333); stroke-width: 2; stroke-linecap: round; fill: none; }",
-            ".edge.child { stroke-dasharray: none; }",
-            ".edge.descendant { stroke-width: 1.8; }",
-            ".node-circle { fill: var(--tpq-node-fill, #f7fbff); stroke: var(--tpq-node-stroke, #1f4e79); stroke-width: 2; }",
-            ".node-label { fill: var(--tpq-node-label, #102a43); text-anchor: middle; dominant-baseline: middle; }",
-            ".legend { fill: var(--tpq-legend, #334e68); font-size: 13px; }",
-            ".title { fill: var(--tpq-title, #102a43); font-size: 18px; font-weight: bold; }",
-            "</style>",
-            "</defs>",
-        ]
-
-        svg_parts.append(
-            f'<text class="title" x="{self.padding}" y="{self.padding / 2 + 8}">TreePatternQuery</text>'
-        )
+        svg_parts = [f'<svg id="tpq-svg" xmlns="http://www.w3.org/2000/svg" '
+                     f'width="{width}" height="{height}" viewBox="0 0 {width} {height}">', "<defs>", "<style>",
+                     "text { font-family: Arial, Helvetica, sans-serif; font-size: 14px; }",
+                     ".edge { stroke: var(--tpq-edge, #333); stroke-width: 2; stroke-linecap: round; fill: none; }",
+                     ".edge.child { stroke-dasharray: none; }", ".edge.descendant { stroke-width: 1.8; }",
+                     ".node-circle { fill: var(--tpq-node-fill, #f7fbff); stroke: var(--tpq-node-stroke, #1f4e79); stroke-width: 2; }",
+                     ".node-label { fill: var(--tpq-node-label, #102a43); text-anchor: middle; dominant-baseline: middle; }",
+                     ".legend { fill: var(--tpq-legend, #334e68); font-size: 13px; }",
+                     ".title { fill: var(--tpq-title, #102a43); font-size: 18px; font-weight: bold; }", "</style>",
+                     "</defs>",
+                     f'<text class="title" x="{self.padding}" y="{self.padding / 2 + 8}">TreePatternQuery</text>']
 
         for edge in layout["edges"]:
             parent = edge["parent"]
@@ -277,6 +357,9 @@ class TreePatternQueryVisualizer:
         interactive: bool = True,
         xpath_query: str | None = None,
     ) -> str:
+        theme_switch = self._theme_switch_html()
+        theme_script = self._theme_switch_script()
+
         if interactive:
             return self._to_interactive_html(title, xpath_query=xpath_query)
         else:
@@ -285,7 +368,7 @@ class TreePatternQueryVisualizer:
             if xpath_query:
                 escaped_query = escape(self._format_xpath_query_for_display(xpath_query))
                 query_block = (
-                    '<p class="query-label">Requete XPath :</p>'
+                    '<p class="query-label">Requête XPath :</p>'
                     f'<pre class="query-value">{escaped_query}</pre>'
                 )
             html_template = Template(
@@ -297,6 +380,7 @@ class TreePatternQueryVisualizer:
   <title>$title</title>
   <style>
     :root {
+      color-scheme: light dark;
       --bg: #f4f7fb;
       --text: #102a43;
       --header-bg: #ffffff;
@@ -313,7 +397,7 @@ class TreePatternQueryVisualizer:
       --tpq-title: #102a43;
     }
     @media (prefers-color-scheme: dark) {
-      :root {
+      :root:not([data-theme='light']) {
         --bg: #0f1720;
         --text: #e6edf5;
         --header-bg: #111b26;
@@ -330,6 +414,40 @@ class TreePatternQueryVisualizer:
         --tpq-title: #e6edf5;
       }
     }
+    :root[data-theme='light'] {
+      color-scheme: light;
+      --bg: #f4f7fb;
+      --text: #102a43;
+      --header-bg: #ffffff;
+      --border: #d9e2ec;
+      --hint: #486581;
+      --panel-bg: #ffffff;
+      --query-bg: #f0f4f8;
+      --shadow: rgba(16, 42, 67, 0.08);
+      --tpq-edge: #334e68;
+      --tpq-node-fill: #f7fbff;
+      --tpq-node-stroke: #1f4e79;
+      --tpq-node-label: #102a43;
+      --tpq-legend: #334e68;
+      --tpq-title: #102a43;
+    }
+    :root[data-theme='dark'] {
+      color-scheme: dark;
+      --bg: #0f1720;
+      --text: #e6edf5;
+      --header-bg: #111b26;
+      --border: #2a3a4a;
+      --hint: #9ab1c9;
+      --panel-bg: #111b26;
+      --query-bg: #172534;
+      --shadow: rgba(0, 0, 0, 0.45);
+      --tpq-edge: #9ab1c9;
+      --tpq-node-fill: #173047;
+      --tpq-node-stroke: #88b3de;
+      --tpq-node-label: #e6edf5;
+      --tpq-legend: #9ab1c9;
+      --tpq-title: #e6edf5;
+    }
     body {
       margin: 0;
       font-family: Arial, Helvetica, sans-serif;
@@ -340,6 +458,19 @@ class TreePatternQueryVisualizer:
       padding: 16px 20px 8px;
       background: var(--header-bg);
       border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+    .header-copy {
+      min-width: 0;
     }
     .hint {
       margin: 6px 0 0;
@@ -376,12 +507,55 @@ class TreePatternQueryVisualizer:
       box-shadow: 0 6px 20px var(--shadow);
       padding: 12px;
     }
+    .theme-switch {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--panel-bg);
+      box-shadow: 0 2px 8px var(--shadow);
+    }
+    .theme-switch-label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--hint);
+      margin-right: 2px;
+    }
+    .theme-option {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s, border-color 0.2s;
+    }
+    .theme-option:hover {
+      background: var(--query-bg);
+    }
+    .theme-option.is-active {
+      background: var(--tpq-edge);
+      border-color: var(--tpq-edge);
+      color: white;
+    }
   </style>
 </head>
 <body>
   <header>
-    <strong>$title</strong>
-    <p class="hint">Les cercles contiennent les labels. Les traits simples représentent les liens child/parent, les doubles traits les liens descendant/ancestor.</p>
+    <div class="header-top">
+      <div class="header-copy">
+        <strong>$title</strong>
+        <p class="hint">Les cercles contiennent les labels. Les traits simples représentent les liens child/parent, les doubles traits les liens descendant/ancestor.</p>
+      </div>
+      $theme_switch
+    </div>
     $query_block
   </header>
   <main>
@@ -389,14 +563,26 @@ class TreePatternQueryVisualizer:
       $svg
     </div>
   </main>
+  <script>
+$theme_script
+  </script>
 </body>
 </html>"""
             )
-            return html_template.substitute(title=escape(title), svg=svg, query_block=query_block)
+            return html_template.substitute(
+                title=escape(title),
+                svg=svg,
+                query_block=query_block,
+                theme_switch=theme_switch,
+                theme_script=theme_script,
+            )
 
     def _to_interactive_html(self, title: str, xpath_query: str | None = None) -> str:
         """Generate an interactive HTML/SVG with force-directed layout and animations."""
         import json
+
+        theme_switch = self._theme_switch_html()
+        theme_script = self._theme_switch_script()
 
         # Build node and edge lists for the graph
         nodes_list = []
@@ -433,7 +619,7 @@ class TreePatternQueryVisualizer:
         if xpath_query:
             escaped_query = escape(self._format_xpath_query_for_display(xpath_query))
             query_block = (
-                '<p class="query-label">Requete XPath :</p>'
+                '<p class="query-label">Requête XPath :</p>'
                 f'<pre class="query-value">{escaped_query}</pre>'
             )
 
@@ -445,6 +631,7 @@ class TreePatternQueryVisualizer:
   <title>{escape(title)}</title>
   <style>
     :root {{
+      color-scheme: light dark;
       --bg-start: #f4f7fb;
       --bg-end: #e8f0f8;
       --text: #102a43;
@@ -463,7 +650,7 @@ class TreePatternQueryVisualizer:
       --shadow: rgba(16, 42, 67, 0.15);
     }}
     @media (prefers-color-scheme: dark) {{
-      :root {{
+      :root:not([data-theme='light']) {{
         --bg-start: #0f1720;
         --bg-end: #101a26;
         --text: #e6edf5;
@@ -481,6 +668,44 @@ class TreePatternQueryVisualizer:
         --node-text: #e6edf5;
         --shadow: rgba(0, 0, 0, 0.45);
       }}
+    }}
+    :root[data-theme='light'] {{
+      color-scheme: light;
+      --bg-start: #f4f7fb;
+      --bg-end: #e8f0f8;
+      --text: #102a43;
+      --header-bg: #ffffff;
+      --border: #d9e2ec;
+      --hint: #486581;
+      --query-bg: #f0f4f8;
+      --panel-bg: #ffffff;
+      --button-bg: #1f4e79;
+      --button-hover: #152f52;
+      --canvas-bg: #f4f7fb;
+      --edge: #1f4e79;
+      --node-fill: #f7fbff;
+      --node-stroke: #1f4e79;
+      --node-text: #102a43;
+      --shadow: rgba(16, 42, 67, 0.15);
+    }}
+    :root[data-theme='dark'] {{
+      color-scheme: dark;
+      --bg-start: #0f1720;
+      --bg-end: #101a26;
+      --text: #e6edf5;
+      --header-bg: #111b26;
+      --border: #2a3a4a;
+      --hint: #9ab1c9;
+      --query-bg: #172534;
+      --panel-bg: #111b26;
+      --button-bg: #2c5f8f;
+      --button-hover: #3a75ad;
+      --canvas-bg: #0f1720;
+      --edge: #88b3de;
+      --node-fill: #173047;
+      --node-stroke: #88b3de;
+      --node-text: #e6edf5;
+      --shadow: rgba(0, 0, 0, 0.45);
     }}
     * {{
       box-sizing: border-box;
@@ -500,6 +725,19 @@ class TreePatternQueryVisualizer:
       border-bottom: 1px solid var(--border);
       box-shadow: 0 2px 8px rgba(16, 42, 67, 0.1);
       z-index: 100;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }}
+    .header-top {{
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      flex-wrap: wrap;
+    }}
+    .header-copy {{
+      min-width: 0;
     }}
     header h1 {{
       margin: 0 0 8px 0;
@@ -554,6 +792,44 @@ class TreePatternQueryVisualizer:
       padding: 12px 16px;
       box-shadow: 0 4px 12px var(--shadow);
     }}
+    .theme-switch {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--panel-bg);
+      box-shadow: 0 2px 8px var(--shadow);
+    }}
+    .theme-switch-label {{
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--hint);
+      margin-right: 2px;
+    }}
+    .theme-option {{
+      appearance: none;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s, border-color 0.2s;
+    }}
+    .theme-option:hover {{
+      background: var(--query-bg);
+    }}
+    .theme-option.is-active {{
+      background: var(--button-bg);
+      border-color: var(--button-bg);
+      color: white;
+    }}
     button {{
       padding: 8px 16px;
       margin-right: 8px;
@@ -575,8 +851,13 @@ class TreePatternQueryVisualizer:
 </head>
 <body>
   <header>
-    <h1>{escape(title)}</h1>
-    <p class="hint">Drag les nœuds pour les déplacer. Traits simples = child/parent · Doubles traits = descendant/ancestor</p>
+    <div class="header-top">
+      <div class="header-copy">
+        <h1>{escape(title)}</h1>
+        <p class="hint">Drag les nœuds pour les déplacer. Traits simples = child/parent · Doubles traits = descendant/ancestor</p>
+      </div>
+      {theme_switch}
+    </div>
     {query_block}
   </header>
   <main>
@@ -590,6 +871,8 @@ class TreePatternQueryVisualizer:
   <script>
     const canvas = document.getElementById('graph');
     const ctx = canvas.getContext('2d');
+
+{theme_script}
 
     function readCssVar(name, fallback) {{
       const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -607,10 +890,10 @@ class TreePatternQueryVisualizer:
     }}
 
     let themeColors = getThemeColors();
-    const darkMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    darkMediaQuery.addEventListener('change', () => {{
+    window.refreshThemeColors = () => {{
       themeColors = getThemeColors();
-    }});
+    }};
+    window.refreshThemeColors();
     
     // Données du graphe
     const graphData = {graph_data};

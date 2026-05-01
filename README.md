@@ -18,11 +18,14 @@ Génère `tpq_visualization.html` avec :
 - **Stabilisation automatique** : L’animation se met en pause quand le graphe est stabilisé
 - **Nœuds persistants** : Un nœud déplacé reste à l’emplacement choisi
 - **Contrôles** : Boutons pour pause/play et réinitialisation de l'animation
+- **Thème manuel** : Basculez entre `clair`, `sombre` et `auto`, avec mémorisation du choix
 - **Hiérarchie préservée** : La racine reste en haut et chaque `parent` / `ancestor` est toujours au-dessus de ses `child` / `descendant`
 
 ### Mode statique
 
 Pour une version SVG statique plus légère :
+
+Le rendu statique inclut aussi le switch `clair / sombre / auto` pour conserver une palette cohérente avec vos préférences.
 
 ```powershell
 python main.py --static -o mon_graphe_static.html
