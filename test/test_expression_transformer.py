@@ -170,6 +170,7 @@ class TestExpressionTransformer(TestCase):
         tpq = self._transform(expression)
         root = tpq.get_root()
 
+        # The true root of the tree is now ancestor_node
         assert root.get_label() == "ancestor_node"
         assert len(root.get_descendants()) == 1
         parent = root.get_descendants()[0]
@@ -183,9 +184,36 @@ class TestExpressionTransformer(TestCase):
         tpq = self._transform(expression)
         root = tpq.get_root()
 
+        # The true root of the tree is now ancestor_node
         assert root.get_label() == "ancestor_node"
         assert len(root.get_descendants()) == 1
         parent = root.get_descendants()[0]
         assert parent.get_label() == "parent_node"
         assert len(parent.get_children()) == 1
         assert parent.get_children()[0].get_label() == "*"
+
+    def test_transform_with_path_composition_applies_right_path_to_left_path(self):
+        expression = "child[(lab = c)]/parent[(lab = p)]"
+
+        tpq = self._transform(expression)
+        root = tpq.get_root()
+
+        assert root.get_label() == "p"
+        assert len(root.get_children()) == 1
+        assert root.get_children()[0].get_label() == "c"
+        assert root.get_descendants() == []
+
+    def test_transform_with_path_composition_child_then_child(self):
+        expression = "child[(lab = c)]/child[(lab = d)]"
+
+        tpq = self._transform(expression)
+        root = tpq.get_root()
+
+        assert root.get_label() == "*"
+        assert len(root.get_children()) == 1
+        left = root.get_children()[0]
+        assert left.get_label() == "c"
+        assert len(left.get_children()) == 1
+        assert left.get_children()[0].get_label() == "d"
+        assert root.get_descendants() == []
+

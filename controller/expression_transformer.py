@@ -4,47 +4,69 @@ from model.query_node import QueryNode
 from model.tree_pattern_query import TreePatternQuery
 
 
+class PathFragment:
+    """Binary path fragment: tree root, current frontier, and entry step."""
+
+    def __init__(self, root, frontier, entry_axis, entry_node):
+        self.root = root
+        self.frontier = frontier
+        self.entry_axis = entry_axis
+        self.entry_node = entry_node
+
+
+# noinspection PyMethodMayBeStatic
 class ExpressionTransformer(Transformer):
     """Build a TreePatternQuery directly from grammar alias methods."""
 
     def transform(self, tree):
         """Transform a Lark parse tree into a TreePatternQuery."""
         result = super().transform(tree)
+        if isinstance(result, PathFragment):
+            result = result.root
+        if isinstance(result, list):
+            result = self._materialize_step_fragment(result).root
         if isinstance(result, QueryNode):
-            root = result
+            node = result
         else:
             raise NotImplementedError(f"Unsupported root expression type: {type(result).__name__}")
 
+        # Ensure we use the true root of the tree, not just the returned node
+        root = self._find_root(node)
         tpq = TreePatternQuery(root)
         tpq.set_nodes()
         return tpq
 
-    @v_args(inline=True)
     def pe(self, args):
-        if args[0]== "self":
-            return args[1]
-        elif args[0]== "child":
-            node = QueryNode("*")
-            node.add_child(args[1])
-            return node
-        elif args[0]== "descendant":
-            node = QueryNode("*")
-            node.add_descendant(args[1])
-            return node
-        elif args[0]== "parent":
-            node = QueryNode("*")
-            args[1].add_child(node)
-            return args[1]
-        elif args[0]== "ancestor":
-            node = QueryNode("*")
-            args[1].add_descendant(node)
-            return args[1]
-        return None
+        if isinstance(args, list) and len(args) == 1:
+            args = args[0]
+
+        if isinstance(args, PathFragment):
+            return args
+
+        if isinstance(args, QueryNode):
+            return PathFragment(args, args, "self", args)
+
+        if self._is_step_fragment(args):
+            return args
+
+        raise NotImplementedError(f"Unsupported pe operands: {type(args).__name__}")
 
     @v_args(inline=True)
     def pe_compose(self, left, right):
-        """XPath compose is out of scope for this transformer."""
-        raise NotImplementedError("compose '/' is not supported by the TPQ transformer")
+        """Compose two path fragments by applying the right path to the left path."""
+        left_fragment = self._materialize_fragment(left)
+        right_fragment = self._materialize_fragment(right)
+
+        # The right fragment is materialized as its own standalone mini-tree.
+        # Before reusing its entry node in the composed path, detach it from that
+        # temporary root so the node can be reattached under the left frontier.
+        if right_fragment.entry_node.get_parent() is not None:
+            self._detach_from_parent(right_fragment.entry_node)
+
+        root, frontier = self._attach_step_with_frontier(
+            left_fragment.frontier, right_fragment.entry_axis, right_fragment.entry_node
+        )
+        return PathFragment(root, frontier, left_fragment.entry_axis, left_fragment.entry_node)
 
     @v_args(inline=True)
     def pe_union(self, _left, _right):
@@ -52,13 +74,11 @@ class ExpressionTransformer(Transformer):
         raise NotImplementedError("Union 'U' is not supported by the TPQ transformer")
 
     def step(self, args):
-        if isinstance(args[0], str):
-            axis = args[0]
-            node = args[1]
-
-            return [axis, node]
-        else:
-            raise NotImplementedError("Complex steps are not supported yet")
+        if len(args) == 2 and isinstance(args[0], str):
+            return [args[0], args[1]]
+        if len(args) == 1 and isinstance(args[0], list) and len(args[0]) == 2:
+            return args[0]
+        raise NotImplementedError("Complex steps are not supported yet")
 
 
     def ne(self, args):
@@ -116,7 +136,7 @@ class ExpressionTransformer(Transformer):
         raise SyntaxError("Unsupported operands for AND expression")
 
     def or_(self, _args):
-        """TODO"""
+        """Boolean OR is out of scope."""
         raise NotImplementedError("OR in node expressions is not supported by the TPQ transformer")
 
     def not_(self, _args):
@@ -177,6 +197,127 @@ class ExpressionTransformer(Transformer):
         else:
             raise SyntaxError(f"Unsupported edge type while rewiring: {edge}")
 
+    def _is_step_fragment(self, fragment):
+        return (
+            isinstance(fragment, list)
+            and len(fragment) == 2
+            and isinstance(fragment[0], str)
+            and isinstance(fragment[1], QueryNode)
+        )
+
+    def _materialize_step_fragment(self, step):
+        axis, node = step
+
+        if axis == "self":
+            return PathFragment(node, node, axis, node)
+
+        if axis == "child":
+            root = QueryNode("*")
+            root.add_child(node)
+            return PathFragment(root, node, axis, node)
+
+        if axis == "descendant":
+            root = QueryNode("*")
+            root.add_descendant(node)
+            return PathFragment(root, node, axis, node)
+
+        if axis == "parent":
+            placeholder = QueryNode("*")
+            node.add_child(placeholder)
+            return PathFragment(node, placeholder, axis, node)
+
+        if axis == "ancestor":
+            placeholder = QueryNode("*")
+            node.add_descendant(placeholder)
+            return PathFragment(node, placeholder, axis, node)
+
+        raise NotImplementedError(f"Unsupported axis in step fragment: {axis}")
+
+    def _materialize_fragment(self, fragment):
+        if isinstance(fragment, PathFragment):
+            return fragment
+        if isinstance(fragment, list):
+            return self._materialize_step_fragment(fragment)
+        if isinstance(fragment, QueryNode):
+            return PathFragment(fragment, fragment, "self", fragment)
+        raise SyntaxError(f"Unsupported fragment type: {type(fragment).__name__}")
+
+    def _attach_step_with_frontier(self, pivot, axis, step_node):
+        """Attach one step and return both the fragment root and the new frontier node."""
+        root = self._find_root(pivot)
+
+        if axis == "child":
+            pivot.add_child(step_node)
+            return root, step_node
+
+        if axis == "descendant":
+            pivot.add_descendant(step_node)
+            return root, step_node
+
+        if axis == "self":
+            self._merge_node_content(pivot, step_node)
+            return root, pivot
+
+        if axis == "parent":
+            for child in list(step_node.get_children()):
+                if child.get_label() == "*" and not child.get_children() and not child.get_descendants():
+                    step_node.remove_child(child)
+                    break
+
+            if pivot.get_parent() is None:
+                step_node.add_child(pivot)
+                return self._find_root(step_node), pivot
+
+            parent = pivot.get_parent()
+            if pivot.parent_edge == "child":
+                self._merge_node_content(parent, step_node)
+                return self._find_root(parent), pivot
+
+            self._detach_from_parent(pivot)
+            parent.add_descendant(step_node)
+            step_node.add_child(pivot)
+            return self._find_root(parent), pivot
+
+        if axis == "ancestor":
+            for descendant in list(step_node.get_descendants()):
+                if descendant.get_label() == "*" and not descendant.get_children() and not descendant.get_descendants():
+                    step_node.remove_descendant(descendant)
+                    break
+
+            if pivot.get_parent() is None:
+                step_node.add_descendant(pivot)
+                return self._find_root(step_node), pivot
+
+            parent = pivot.get_parent()
+            is_direct_parent = pivot.parent_edge == "child"
+            is_ancestor_witness = pivot.parent_edge == "descendant"
+            if not (is_direct_parent or is_ancestor_witness):
+                raise SyntaxError(f"Unsupported parent edge for ancestor axis: {pivot.parent_edge}")
+
+            compatible_ancestor = self._find_compatible_ancestor(parent, step_node)
+            if compatible_ancestor is not None:
+                self._merge_node_content(compatible_ancestor, step_node)
+                return self._find_root(compatible_ancestor), pivot
+
+            if is_ancestor_witness:
+                raise SyntaxError(
+                    "AND between ancestor constraints requires a compatible ancestor witness"
+                )
+
+            grand_parent = parent.get_parent()
+            parent_edge = parent.parent_edge
+            self._detach_from_parent(parent)
+            step_node.add_descendant(parent)
+
+            if grand_parent is not None:
+                self._attach_via_edge(grand_parent, parent_edge, step_node)
+                return self._find_root(grand_parent), pivot
+
+            return self._find_root(step_node), pivot
+
+        raise SyntaxError(f"Unsupported axis in AND expression: {axis}")
+
+
     def _merge_node_content(self, target, source):
         """Move source constraints into target and fuse labels."""
         if target is source:
@@ -195,69 +336,14 @@ class ExpressionTransformer(Transformer):
         return target
 
     def _attach_step(self, pivot, axis, step_node):
-        """Attach one step constraint around the pivot and return the fragment root."""
-        root = self._find_root(pivot)
+        """Attach one-step constraint around the pivot and return the pivot (frontier).
 
-        if axis == "child":
-            pivot.add_child(step_node)
-            return root
+        This method modifies the tree structure in-place by attaching the step_node
+        relative to the pivot. The tree topology may change (e.g., ancestors may be
+        added above the pivot), but the pivot itself remains the node on which the
+        constraint is applied and should be returned to callers.
+        """
+        self._attach_step_with_frontier(pivot, axis, step_node)
+        return pivot
 
-        if axis == "descendant":
-            pivot.add_descendant(step_node)
-            return root
 
-        if axis == "self":
-            self._merge_node_content(pivot, step_node)
-            return root
-
-        if axis == "parent":
-            if pivot.get_parent() is None:
-                step_node.add_child(pivot)
-                return self._find_root(step_node)
-
-            parent = pivot.get_parent()
-            if pivot.parent_edge == "child":
-                self._merge_node_content(parent, step_node)
-                return self._find_root(parent)
-
-            # Existing ancestor constraint + new parent constraint: insert between parent and pivot.
-            self._detach_from_parent(pivot)
-            parent.add_descendant(step_node)
-            step_node.add_child(pivot)
-            return self._find_root(parent)
-
-        if axis == "ancestor":
-            if pivot.get_parent() is None:
-                step_node.add_descendant(pivot)
-                return self._find_root(step_node)
-
-            parent = pivot.get_parent()
-            is_direct_parent = pivot.parent_edge == "child"
-            is_ancestor_witness = pivot.parent_edge == "descendant"
-            if not (is_direct_parent or is_ancestor_witness):
-                raise SyntaxError(f"Unsupported parent edge for ancestor axis: {pivot.parent_edge}")
-
-            compatible_ancestor = self._find_compatible_ancestor(parent, step_node)
-            if compatible_ancestor is not None:
-                # Reuse an existing ancestor witness (parent or higher ancestor) when labels allow it.
-                self._merge_node_content(compatible_ancestor, step_node)
-                return self._find_root(compatible_ancestor)
-
-            if is_ancestor_witness:
-                raise SyntaxError(
-                    "AND between ancestor constraints requires a compatible ancestor witness"
-                )
-
-            # No reusable witness found and the parent is a direct child: insert ancestor => parent => pivot.
-            grand_parent = parent.get_parent()
-            parent_edge = parent.parent_edge
-            self._detach_from_parent(parent)
-            step_node.add_descendant(parent)
-
-            if grand_parent is not None:
-                self._attach_via_edge(grand_parent, parent_edge, step_node)
-                return self._find_root(grand_parent)
-
-            return self._find_root(step_node)
-
-        raise SyntaxError(f"Unsupported axis in AND expression: {axis}")

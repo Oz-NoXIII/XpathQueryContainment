@@ -1,7 +1,5 @@
 from unittest import TestCase
 
-from _pytest.mark import expression
-
 from model.query_node import QueryNode as Qnode
 
 
