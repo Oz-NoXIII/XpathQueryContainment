@@ -301,13 +301,15 @@ class TreePatternQueryVisualizer:
         positions = layout["positions"]
         width = layout["width"]
         height = layout["height"]
+        output_u1, output_u2 = self.tree_pattern_query.get_output_nodes()
 
         svg_parts = [f'<svg id="tpq-svg" xmlns="http://www.w3.org/2000/svg" '
                      f'width="{width}" height="{height}" viewBox="0 0 {width} {height}">', "<defs>", "<style>",
                      "text { font-family: Arial, Helvetica, sans-serif; font-size: 14px; }",
                      ".edge { stroke: var(--tpq-edge, #333); stroke-width: 2; stroke-linecap: round; fill: none; }",
                      ".edge.child { stroke-dasharray: none; }", ".edge.descendant { stroke-width: 1.8; }",
-                     ".node-circle { fill: var(--tpq-node-fill, #f7fbff); stroke: var(--tpq-node-stroke, #1f4e79); stroke-width: 2; }",
+                      ".node-circle { fill: var(--tpq-node-fill, #f7fbff); stroke: var(--tpq-node-stroke, #1f4e79); stroke-width: 2; }",
+                      ".node-circle.output { fill: #7ccf7c; }",
                      ".node-label { fill: var(--tpq-node-label, #102a43); text-anchor: middle; dominant-baseline: middle; }",
                      ".legend { fill: var(--tpq-legend, #334e68); font-size: 13px; }",
                      ".title { fill: var(--tpq-title, #102a43); font-size: 18px; font-weight: bold; }", "</style>",
@@ -339,7 +341,14 @@ class TreePatternQueryVisualizer:
 
         for node, (x, y) in positions.items():
             label = escape(str(node.get_label()))
-            svg_parts.append(f'<circle class="node-circle" cx="{x}" cy="{y}" r="{self.node_radius}" />')
+            roles = []
+            if node is output_u1:
+                roles.append("u1")
+            if node is output_u2:
+                roles.append("u2")
+            extra_class = " output" if roles else ""
+            roles_attr = f' data-output-roles="{','.join(roles)}"' if roles else ''
+            svg_parts.append(f'<circle class="node-circle{extra_class}" cx="{x}" cy="{y}" r="{self.node_radius}"{roles_attr} />')
             svg_parts.append(f'<text class="node-label" x="{x}" y="{y}">{label}</text>')
 
         legend_y = height - self.padding / 2
@@ -589,6 +598,7 @@ $theme_script
         edges_list = []
         nodes_by_id = {}
         node_counter = [0]
+        output_u1, output_u2 = self.tree_pattern_query.get_output_nodes()
 
         def traverse(node: QueryNode, depth: int = 0):
             node_id = id(node)
@@ -598,7 +608,12 @@ $theme_script
             idx = node_counter[0]
             node_counter[0] += 1
             label = str(node.get_label())
-            nodes_list.append({"id": f"node_{idx}", "label": label, "index": idx, "depth": depth})
+            roles = []
+            if node is output_u1:
+                roles.append("u1")
+            if node is output_u2:
+                roles.append("u2")
+            nodes_list.append({"id": f"node_{idx}", "label": label, "index": idx, "depth": depth, "roles": roles})
             nodes_by_id[node_id] = idx
 
             for child in node.get_children():
@@ -615,12 +630,19 @@ $theme_script
 
         graph_data = json.dumps({"nodes": nodes_list, "edges": edges_list})
 
+        # Provide an editable input in the header so the user can type a query
         query_block = ""
         if xpath_query:
-            escaped_query = escape(self._format_xpath_query_for_display(xpath_query))
+            # show the formatted query inside a textarea so it can be edited
+            # keep the pretty-printed display for readability, but allow editing the raw expression
+            raw_query = xpath_query
+            pretty = escape(self._format_xpath_query_for_display(xpath_query))
             query_block = (
                 '<p class="query-label">Requête XPath :</p>'
-                f'<pre class="query-value">{escaped_query}</pre>'
+                f'<textarea id="xpath-input" class="query-value" rows="3">{escape(raw_query)}</textarea>'
+                f'<div style="margin-top:8px;"><button id="update-xpath">Mettre à jour</button></div>'
+                f'<p class="query-label" style="margin-top:8px;">Requête (mise en forme) :</p>'
+                f'<pre class="query-value">{pretty}</pre>'
             )
 
         html = f"""<!doctype html>
@@ -895,11 +917,33 @@ $theme_script
     }};
     window.refreshThemeColors();
     
-    // Données du graphe
-    const graphData = {graph_data};
-    const nodes = graphData.nodes;
-    const edges = graphData.edges;
-    
+    // Données du graphe (chargées dynamiquement depuis le serveur)
+    let nodes = [];
+    let edges = [];
+    const initialExpression = {json.dumps(xpath_query or '')};
+
+    async function fetchGraph(expression) {{
+      try {{
+        const params = new URLSearchParams({{ expression }});
+        const resp = await fetch('/graph?' + params.toString());
+        if (!resp.ok) {{
+          const text = await resp.text();
+          alert('Erreur lors de la génération du graphe: ' + resp.status + '\\n' + text);
+          return;
+        }}
+        const data = await resp.json();
+        nodes.length = 0;
+        edges.length = 0;
+        data.nodes.forEach(n => nodes.push(n));
+        data.edges.forEach(e => edges.push(e));
+        animationState.maxTime = nodes.length * 200;
+        initializeLayout();
+        resetAnimation();
+      }} catch (err) {{
+        alert('Erreur réseau: ' + err);
+      }}
+    }}
+
     // État de l'animation
     let animationState = {{
       isRunning: true,
@@ -1218,25 +1262,54 @@ $theme_script
         }}
       }});
       
-      // Dessiner les nœuds
-      nodes.forEach(node => {{
+        // Dessiner les nœuds
+       nodes.forEach(node => {{
         if (!node.isVisible) return;
         
-        // Cercle
-        ctx.fillStyle = themeColors.nodeFill;
-        ctx.strokeStyle = themeColors.nodeStroke;
+        // Cercle: si node.roles présent, mettre un fond vert plus visible
+        const hasRoles = Array.isArray(node.roles) && node.roles.length > 0;
+        if (hasRoles) {{
+          ctx.fillStyle = '#7ccf7c';
+          ctx.strokeStyle = '#2e8b57';
+        }} else {{
+          ctx.fillStyle = themeColors.nodeFill;
+          ctx.strokeStyle = themeColors.nodeStroke;
+        }}
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.arc(node.x, node.y, params.nodeRadius, 0, 2 * Math.PI);
         ctx.fill();
         ctx.stroke();
-        
+
         // Label
         ctx.fillStyle = themeColors.nodeText;
         ctx.font = 'bold 13px Arial';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(node.label, node.x, node.y);
+
+        // Badges for roles (u1 / u2) drawn as small circles with text
+        if (hasRoles) {{
+          const badgeRadius = 10;
+          let badgeOffset = 0;
+          node.roles.forEach((role, i) => {{
+            const bx = node.x + params.nodeRadius * 0.65 + badgeOffset;
+            const by = node.y - params.nodeRadius * 0.65;
+            const color = role === 'u1' ? '#2e8b57' : '#0b9aa6';
+            // circle
+            ctx.beginPath();
+            ctx.fillStyle = color;
+            ctx.arc(bx, by, badgeRadius, 0, 2 * Math.PI);
+            ctx.fill();
+            // text
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 10px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(role, bx, by);
+            badgeOffset += badgeRadius * 1.8;
+          }});
+        }}
       }});
     }}
     
@@ -1317,6 +1390,31 @@ $theme_script
         animationState.settleCounter = 0;
       }}
     }}
+
+    // Hook for the update button in the header + initial loading
+    document.addEventListener('DOMContentLoaded', () => {{
+      const btn = document.getElementById('update-xpath');
+      const ta = document.getElementById('xpath-input');
+
+      const loadExpression = async (expr) => {{
+        await fetchGraph(expr);
+        try {{ history.replaceState(null, '', '?expression=' + encodeURIComponent(expr)); }} catch (_) {{}}
+      }};
+
+      if (btn) {{
+        btn.addEventListener('click', () => {{
+          const expr = ta ? ta.value : '';
+          loadExpression(expr);
+        }});
+      }}
+
+      if (ta) {{
+        const urlParams = new URLSearchParams(window.location.search);
+        const q = urlParams.get('expression') || initialExpression || ta.value || '';
+        ta.value = q;
+        loadExpression(q);
+      }}
+    }});
     
     update();
   </script>

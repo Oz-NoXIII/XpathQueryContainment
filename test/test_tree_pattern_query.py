@@ -83,5 +83,16 @@ class TestTreePatternQuery(TestCase):
 		assert t.get_labels() == {"A": 1, "B": 1, "C": 1, "D": 1, "E": 1}
 
 	def test_q(self):
-		# TODO: implement this test once the q method is implemented
-		pass
+		u1 = Qnode("A")
+		u2 = Qnode("B")
+		u1.add_child(u2)
+		t = TPQ(u1)
+		t.set_output_nodes(u1, u2)
+		t.set_nodes()
+		assert t.q(None) == (u1, u2)
+		assert t.get_output_nodes() == (u1, u2)
+
+		fallback_root = Qnode("C")
+		fallback = TPQ(fallback_root)
+		fallback.set_nodes()
+		assert fallback.q(None) == (fallback_root, fallback_root)

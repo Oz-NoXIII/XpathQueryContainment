@@ -7,11 +7,13 @@ from model.tree_pattern_query import TreePatternQuery
 class PathFragment:
     """Binary path fragment: tree root, current frontier, and entry step."""
 
-    def __init__(self, root, frontier, entry_axis, entry_node):
+    def __init__(self, root, frontier, entry_axis, entry_node, output_u1=None, output_u2=None):
         self.root = root
         self.frontier = frontier
         self.entry_axis = entry_axis
         self.entry_node = entry_node
+        self.output_u1 = root if output_u1 is None else output_u1
+        self.output_u2 = frontier if output_u2 is None else output_u2
 
 
 # noinspection PyMethodMayBeStatic
@@ -20,19 +22,33 @@ class ExpressionTransformer(Transformer):
 
     def transform(self, tree):
         """Transform a Lark parse tree into a TreePatternQuery."""
+        # Detect top-level boolean start (start -> ne) so we can produce a BoolTPQ
+        boolean_query = getattr(tree, "data", None) == "ne"
         result = super().transform(tree)
         if isinstance(result, PathFragment):
-            result = result.root
-        if isinstance(result, list):
-            result = self._materialize_step_fragment(result).root
-        if isinstance(result, QueryNode):
+            node = result.root
+            output_u1 = result.output_u1
+            output_u2 = result.output_u2
+        elif isinstance(result, list):
+            result = self._materialize_step_fragment(result)
+            node = result.root
+            output_u1 = result.output_u1
+            output_u2 = result.output_u2
+        elif isinstance(result, QueryNode):
             node = result
+            output_u1 = node
+            output_u2 = node
         else:
             raise NotImplementedError(f"Unsupported root expression type: {type(result).__name__}")
 
         # Ensure we use the true root of the tree, not just the returned node
         root = self._find_root(node)
         tpq = TreePatternQuery(root)
+        if boolean_query:
+            tpq.is_boolean = True
+        else:
+            # only set output nodes for non-boolean queries
+            tpq.set_output_nodes(output_u1, output_u2)
         tpq.set_nodes()
         return tpq
 
@@ -44,7 +60,7 @@ class ExpressionTransformer(Transformer):
             return args
 
         if isinstance(args, QueryNode):
-            return PathFragment(args, args, "self", args)
+            return PathFragment(args, args, "self", args, args, args)
 
         if self._is_step_fragment(args):
             return args
@@ -66,7 +82,9 @@ class ExpressionTransformer(Transformer):
         root, frontier = self._attach_step_with_frontier(
             left_fragment.frontier, right_fragment.entry_axis, right_fragment.entry_node
         )
-        return PathFragment(root, frontier, left_fragment.entry_axis, left_fragment.entry_node)
+        # In R o R', u1 remains the source of the left relation (updated to the new tree root if needed).
+        output_u1 = left_fragment.output_u1 if left_fragment.output_u1 is not left_fragment.root else root
+        return PathFragment(root, frontier, left_fragment.entry_axis, left_fragment.entry_node, output_u1, frontier)
 
     @v_args(inline=True)
     def pe_union(self, _left, _right):
@@ -209,27 +227,27 @@ class ExpressionTransformer(Transformer):
         axis, node = step
 
         if axis == "self":
-            return PathFragment(node, node, axis, node)
+            return PathFragment(node, node, axis, node, node, node)
 
         if axis == "child":
             root = QueryNode("*")
             root.add_child(node)
-            return PathFragment(root, node, axis, node)
+            return PathFragment(root, node, axis, node, root, node)
 
         if axis == "descendant":
             root = QueryNode("*")
             root.add_descendant(node)
-            return PathFragment(root, node, axis, node)
+            return PathFragment(root, node, axis, node, root, node)
 
         if axis == "parent":
             placeholder = QueryNode("*")
             node.add_child(placeholder)
-            return PathFragment(node, placeholder, axis, node)
+            return PathFragment(node, placeholder, axis, node, node, placeholder)
 
         if axis == "ancestor":
             placeholder = QueryNode("*")
             node.add_descendant(placeholder)
-            return PathFragment(node, placeholder, axis, node)
+            return PathFragment(node, placeholder, axis, node, node, placeholder)
 
         raise NotImplementedError(f"Unsupported axis in step fragment: {axis}")
 
@@ -239,7 +257,7 @@ class ExpressionTransformer(Transformer):
         if isinstance(fragment, list):
             return self._materialize_step_fragment(fragment)
         if isinstance(fragment, QueryNode):
-            return PathFragment(fragment, fragment, "self", fragment)
+            return PathFragment(fragment, fragment, "self", fragment, fragment, fragment)
         raise SyntaxError(f"Unsupported fragment type: {type(fragment).__name__}")
 
     def _attach_step_with_frontier(self, pivot, axis, step_node):

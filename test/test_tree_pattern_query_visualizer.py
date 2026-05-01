@@ -140,6 +140,20 @@ class TestTreePatternQueryVisualizer(TestCase):
 		assert "?child[" in formatted
 		assert "/" in formatted
 
+	def test_visualizer_uses_q_outputs_for_complex_query(self):
+		from controller.expression_transformer import ExpressionTransformer
+		from controller.xpath_parser import XPathParser
+
+		expression = "(self[(lab = *)&?descendant[(lab = c)]&?ancestor[(lab = a)&?child[(lab = b)&?child[(lab = c)]]&?descendant[(lab = e)]]]/child[(lab = d)])"
+		tpq = ExpressionTransformer().transform(XPathParser().parse(expression))
+		visualizer = TreePatternQueryVisualizer(tpq)
+
+		svg = visualizer.to_svg()
+
+		assert 'data-output-roles="u1"' in svg
+		assert 'data-output-roles="u2"' in svg
+		assert 'data-output-roles="u1,u2"' not in svg
+
 
 
 

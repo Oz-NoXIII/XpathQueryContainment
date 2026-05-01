@@ -139,3 +139,20 @@ class TestQueryNode(TestCase):
 		n2 = Qnode("A")
 		assert n1 == n1
 		assert n1 != n2
+
+	def test_output_roles(self):
+		n = Qnode("A")
+		assert not n.is_an_output_node()
+		assert n.get_output_roles() == frozenset()
+
+		n.add_output_role("u1")
+		assert n.is_an_output_node()
+		assert n.is_u1_output_node()
+		assert not n.is_u2_output_node()
+		assert n.output_node is True
+		assert n.get_output_roles() == frozenset({"u1"})
+
+		n.add_output_role("u2")
+		assert n.is_u1_output_node()
+		assert n.is_u2_output_node()
+		assert n.get_output_roles() == frozenset({"u1", "u2"})
