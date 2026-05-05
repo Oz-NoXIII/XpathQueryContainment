@@ -642,7 +642,7 @@ $theme_script
                 f'<textarea id="xpath-input" class="query-value" rows="3">{escape(raw_query)}</textarea>'
                 f'<div style="margin-top:8px;"><button id="update-xpath">Mettre à jour</button></div>'
                 f'<p class="query-label" style="margin-top:8px;">Requête (mise en forme) :</p>'
-                f'<pre class="query-value">{pretty}</pre>'
+                f'<pre id="xpath-formatted" class="query-value">{pretty}</pre>'
             )
 
         html = f"""<!doctype html>
@@ -882,13 +882,14 @@ $theme_script
     </div>
     {query_block}
   </header>
-  <main>
-    <canvas id="graph"></canvas>
-    <div class="controls">
-      <button onclick="resetAnimation()">Réinitialiser</button>
-      <button onclick="toggleAnimation()">Pause/Play</button>
-    </div>
-  </main>
+   <main>
+     <canvas id="graph"></canvas>
+     <div class="controls">
+       <button onclick="resetAnimation()">Réinitialiser</button>
+       <button onclick="toggleAnimation()">Pause/Play</button>
+       <button onclick="booleanizeQuery()" id="booleanize-btn">Booléaniser</button>
+     </div>
+   </main>
 
   <script>
     const canvas = document.getElementById('graph');
@@ -929,18 +930,24 @@ $theme_script
         if (!resp.ok) {{
           const text = await resp.text();
           alert('Erreur lors de la génération du graphe: ' + resp.status + '\\n' + text);
-          return;
+          return false;
         }}
         const data = await resp.json();
         nodes.length = 0;
         edges.length = 0;
         data.nodes.forEach(n => nodes.push(n));
         data.edges.forEach(e => edges.push(e));
+        const formattedQuery = document.getElementById('xpath-formatted');
+        if (formattedQuery && typeof data.formatted_query === 'string') {{
+          formattedQuery.textContent = data.formatted_query;
+        }}
         animationState.maxTime = nodes.length * 200;
         initializeLayout();
         resetAnimation();
+        return true;
       }} catch (err) {{
         alert('Erreur réseau: ' + err);
+        return false;
       }}
     }}
 
@@ -1384,12 +1391,43 @@ $theme_script
       initializeLayout();
     }}
     
-    function toggleAnimation() {{
-      animationState.isRunning = !animationState.isRunning;
-      if (animationState.isRunning) {{
-        animationState.settleCounter = 0;
-      }}
-    }}
+     function toggleAnimation() {{
+       animationState.isRunning = !animationState.isRunning;
+       if (animationState.isRunning) {{
+         animationState.settleCounter = 0;
+       }}
+     }}
+
+     function booleanizeQuery() {{
+       const currentExpr = document.getElementById('xpath-input')?.value || initialExpression;
+       const params = new URLSearchParams({{ expression: currentExpr }});
+       
+       fetch('/booleanize?' + params.toString())
+         .then(resp => {{
+           if (!resp.ok) {{
+             alert('Erreur lors de la booléanisation');
+             return;
+           }}
+           return resp.json();
+         }})
+         .then(data => {{
+           if (data) {{
+             nodes.length = 0;
+             edges.length = 0;
+             data.nodes.forEach(n => nodes.push(n));
+             data.edges.forEach(e => edges.push(e));
+             const formattedQuery = document.getElementById('xpath-formatted');
+             if (formattedQuery && typeof data.formatted_query === 'string') {{
+               formattedQuery.textContent = data.formatted_query;
+             }}
+             animationState.maxTime = nodes.length * 200;
+             initializeLayout();
+             resetAnimation();
+             document.getElementById('booleanize-btn').disabled = true;
+           }}
+         }})
+         .catch(err => alert('Erreur: ' + err));
+     }}
 
     // Hook for the update button in the header + initial loading
     document.addEventListener('DOMContentLoaded', () => {{
@@ -1397,8 +1435,10 @@ $theme_script
       const ta = document.getElementById('xpath-input');
 
       const loadExpression = async (expr) => {{
-        await fetchGraph(expr);
-        try {{ history.replaceState(null, '', '?expression=' + encodeURIComponent(expr)); }} catch (_) {{}}
+        const ok = await fetchGraph(expr);
+        if (ok) {{
+          try {{ history.replaceState(null, '', '?expression=' + encodeURIComponent(expr)); }} catch (_) {{}}
+        }}
       }};
 
       if (btn) {{

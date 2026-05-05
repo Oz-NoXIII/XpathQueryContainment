@@ -22,8 +22,6 @@ class ExpressionTransformer(Transformer):
 
     def transform(self, tree):
         """Transform a Lark parse tree into a TreePatternQuery."""
-        # Detect top-level boolean start (start -> ne) so we can produce a BoolTPQ
-        boolean_query = getattr(tree, "data", None) == "ne"
         result = super().transform(tree)
         if isinstance(result, PathFragment):
             node = result.root
@@ -44,11 +42,7 @@ class ExpressionTransformer(Transformer):
         # Ensure we use the true root of the tree, not just the returned node
         root = self._find_root(node)
         tpq = TreePatternQuery(root)
-        if boolean_query:
-            tpq.is_boolean = True
-        else:
-            # only set output nodes for non-boolean queries
-            tpq.set_output_nodes(output_u1, output_u2)
+        tpq.set_output_nodes(output_u1, output_u2)
         tpq.set_nodes()
         return tpq
 
@@ -82,8 +76,9 @@ class ExpressionTransformer(Transformer):
         root, frontier = self._attach_step_with_frontier(
             left_fragment.frontier, right_fragment.entry_axis, right_fragment.entry_node
         )
-        # In R o R', u1 remains the source of the left relation (updated to the new tree root if needed).
-        output_u1 = left_fragment.output_u1 if left_fragment.output_u1 is not left_fragment.root else root
+        # Preserve the original u1 witness node through rewiring; it should keep
+        # pointing to the same node object even if that node is moved higher.
+        output_u1 = left_fragment.output_u1
         return PathFragment(root, frontier, left_fragment.entry_axis, left_fragment.entry_node, output_u1, frontier)
 
     @v_args(inline=True)

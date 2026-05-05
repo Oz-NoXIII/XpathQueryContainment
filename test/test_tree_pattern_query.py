@@ -96,3 +96,43 @@ class TestTreePatternQuery(TestCase):
 		fallback = TPQ(fallback_root)
 		fallback.set_nodes()
 		assert fallback.q(None) == (fallback_root, fallback_root)
+
+	def test_to_boolean_tpq_attaches_sentinel_children(self):
+		root = Qnode("root")
+		output_leaf = Qnode("out")
+		plain_leaf = Qnode("plain")
+		root.add_child(output_leaf)
+		root.add_child(plain_leaf)
+		tpq = TPQ(root)
+		tpq.set_output_nodes(root, output_leaf)
+		tpq.set_nodes()
+
+		boolean_tpq = tpq.to_boolean_tpq()
+		boolean_root = boolean_tpq.get_root()
+
+		assert boolean_tpq is not tpq
+		assert boolean_tpq.is_boolean is True
+		assert tpq.is_boolean is False
+		assert tpq.get_root().get_children() == [output_leaf, plain_leaf]
+		assert boolean_tpq.get_output_nodes() == (None, None)
+		assert boolean_root.get_label() == "root"
+
+		child_labels = [child.get_label() for child in boolean_root.get_children()]
+		assert child_labels == ["out", "plain", "o1"]
+		assert [child.get_label() for child in boolean_root.get_children()[0].get_children()] == ["o2"]
+		assert [child.get_label() for child in boolean_root.get_children()[1].get_children()] == ["*"]
+
+	def test_to_boolean_tpq_uses_resolved_output_u1(self):
+		from controller.expression_transformer import ExpressionTransformer
+		from controller.xpath_parser import XPathParser
+
+		expression = "(self[(lab = *)&?descendant[(lab = c)]&?ancestor[(lab = a)&?child[(lab = b)&?child[(lab = c)]]&?descendant[(lab = e)]]]/child[(lab = d)])"
+		tpq = ExpressionTransformer().transform(XPathParser().parse(expression))
+		boolean_tpq = tpq.to_boolean_tpq()
+
+		root = boolean_tpq.get_root()
+		wildcard = root.get_descendants()[1]
+		assert root.get_label() == "a"
+		assert wildcard.get_label() == "*"
+		assert {child.get_label() for child in wildcard.get_children()} == {"d", "o1"}
+

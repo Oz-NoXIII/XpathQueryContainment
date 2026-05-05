@@ -1,3 +1,6 @@
 /.idea
 *.pyc
 .coverage
+grammar/test.lark
+tpq_visualization.html
+tpq_visualization_static.html

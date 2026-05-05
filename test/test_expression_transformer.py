@@ -277,4 +277,6 @@ class TestExpressionTransformer(TestCase):
         assert root.get_label() == "a"
         assert u1 is not None and u1.get_label() == "*"
         assert u2 is not None and u2.get_label() == "d"
+        assert tpq.get_output_nodes()[0] is u1
+        assert tpq.get_output_nodes()[1] is u2
 

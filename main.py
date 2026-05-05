@@ -64,6 +64,7 @@ def main():
 						try:
 							tree = parser_obj.parse(expr)
 							tpq = transformer.transform(tree)
+							visualizer = TreePatternQueryVisualizer(tpq)
 							# Build nodes/edges as in visualizer._to_interactive_html
 							nodes_list = []
 							edges_list = []
@@ -95,7 +96,60 @@ def main():
 								return idx
 
 							traverse(tpq.get_root())
-							payload = json.dumps({"nodes": nodes_list, "edges": edges_list})
+							payload = json.dumps({
+								"nodes": nodes_list,
+								"edges": edges_list,
+								"formatted_query": visualizer._format_xpath_query_for_display(expr),
+							})
+							self._write(200, payload, content_type="application/json")
+						except Exception as e:
+							self._write(500, str(e), content_type="text/plain")
+						return
+
+					if parsed.path == "/booleanize":
+						expr = qs.get("expression", [args.expression])[0]
+						try:
+							tree = parser_obj.parse(expr)
+							tpq = transformer.transform(tree)
+							boolean_tpq = tpq.to_boolean_tpq()
+							visualizer = TreePatternQueryVisualizer(boolean_tpq)
+							# Build nodes/edges for the booleanized TPQ
+							nodes_list = []
+							edges_list = []
+							nodes_by_id = {}
+							node_counter = [0]
+
+							def traverse(node, depth=0):
+								node_id = id(node)
+								if node_id in nodes_by_id:
+									return nodes_by_id[node_id]
+								idx = node_counter[0]
+								node_counter[0] += 1
+								label = str(node.get_label())
+								roles = []
+								u1, u2 = boolean_tpq.get_output_nodes()
+								if node is u1:
+									roles.append("u1")
+								if node is u2:
+									roles.append("u2")
+								nodes_list.append({"id": f"node_{idx}", "label": label, "index": idx, "depth": depth, "roles": roles})
+								nodes_by_id[node_id] = idx
+
+								for child in node.get_children():
+									child_idx = traverse(child, depth + 1)
+									edges_list.append({"source": idx, "target": child_idx, "type": "child"})
+								for desc in node.get_descendants():
+									desc_idx = traverse(desc, depth + 1)
+									edges_list.append({"source": idx, "target": desc_idx, "type": "descendant"})
+								return idx
+
+							traverse(boolean_tpq.get_root())
+							payload = json.dumps({
+								"nodes": nodes_list,
+								"edges": edges_list,
+								"formatted_query": visualizer._format_xpath_query_for_display(expr) + "\n(booléanisé)",
+								"is_boolean": True,
+							})
 							self._write(200, payload, content_type="application/json")
 						except Exception as e:
 							self._write(500, str(e), content_type="text/plain")
@@ -107,7 +161,7 @@ def main():
 			return Handler
 
 		server_address = (host, port)
-		httpd = HTTPServer(server_address, make_handler())
+		httpd = HTTPServer(server_address, make_handler())  # type: ignore[arg-type]
 		url = f"http://{host}:{port}/?expression={quote(args.expression or '')}"
 		print(f"Démarrage du serveur local sur {host}:{port}\nOuvrir {url}")
 		if not args.no_open:
