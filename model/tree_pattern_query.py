@@ -4,6 +4,10 @@ It allows you to define a tree pattern query and then execute the query against 
 tree to find the result of it.
 """
 
+from __future__ import annotations
+
+from typing import Any
+
 from model.query_node import QueryNode
 
 
@@ -125,6 +129,121 @@ class TreePatternQuery:
 
 	def get_labels(self):
 		return dict(self.labs)
+
+	def _preorder_nodes(self, node=None, result=None):
+		if result is None:
+			result = []
+		if node is None:
+			node = self.root
+		if node in result:
+			return result
+		result.append(node)
+		for child in node.get_children():
+			self._preorder_nodes(child, result)
+		for descendant in node.get_descendants():
+			self._preorder_nodes(descendant, result)
+		return result
+
+	def _strict_descendants(self, node):
+		result = []
+		stack = list(reversed(node.get_children())) + list(reversed(node.get_descendants()))
+		seen = set()
+		while stack:
+			current = stack.pop()
+			if current in seen:
+				continue
+			seen.add(current)
+			result.append(current)
+			for child in reversed(current.get_children()):
+				stack.append(child)
+			for descendant in reversed(current.get_descendants()):
+				stack.append(descendant)
+		return result
+
+	def _node_to_id_map(self, prefix):
+		mapping = {}
+		for index, node in enumerate(self.get_nodes() or self._preorder_nodes()):
+			node_id = getattr(node, "graph_id", None)
+			mapping[node] = node_id if isinstance(node_id, str) and node_id else f"{prefix}_{index}"
+		return mapping
+
+	def find_bool_tpq_lab_homomorphism(self, target_tpq: TreePatternQuery) -> dict[str, Any]:
+		"""Find a label-preserving homomorphism from this BoolTPQ_Lab to another one."""
+		if not isinstance(target_tpq, TreePatternQuery):
+			raise TypeError("The target query must be a TreePatternQuery instance.")
+
+		source_nodes = self.get_nodes() or self._preorder_nodes()
+		target_nodes = target_tpq.get_nodes() or target_tpq._preorder_nodes()
+		source_node_to_id = self._node_to_id_map("source")
+		target_node_to_id = target_tpq._node_to_id_map("target")
+
+		source_labels = {node: node.get_label() for node in source_nodes}
+		target_labels = {node: node.get_label() for node in target_nodes}
+		source_outgoing = {node: [("child", child) for child in node.get_children()] + [("descendant", descendant) for descendant in node.get_descendants()] for node in source_nodes}
+		target_outgoing = {node: [("child", child) for child in node.get_children()] + [("descendant", descendant) for descendant in node.get_descendants()] for node in target_nodes}
+
+		memo = {}
+		witness = {}
+
+		def candidate_targets(parent_target, edge_type):
+			if edge_type == "child":
+				return [child for _edge_type, child in target_outgoing.get(parent_target, []) if _edge_type == "child"]
+			return target_tpq._strict_descendants(parent_target)
+
+		def match(source_node, target_node):
+			key = (source_node, target_node)
+			if key in memo:
+				return memo[key]
+
+			if source_labels[source_node] != target_labels[target_node]:
+				memo[key] = False
+				return False
+
+			for edge_type, child in source_outgoing.get(source_node, []):
+				matched = False
+				for candidate in candidate_targets(target_node, edge_type):
+					if match(child, candidate):
+						matched = True
+						break
+				if not matched:
+					memo[key] = False
+					return False
+
+			witness[source_node] = target_node
+			memo[key] = True
+			return True
+
+		exists = match(self.root, target_tpq.root)
+		if not exists:
+			return {
+				"exists": False,
+				"message": "Aucun homomorphisme n'a été trouvé entre q1 et q2.",
+				"mapping": [],
+				"highlight_target_ids": [],
+			}
+
+		mapping = []
+		for source_node in source_nodes:
+			target_node = witness[source_node]
+			mapping.append(
+				{
+					"source_id": source_node_to_id[source_node],
+					"source_label": source_labels[source_node],
+					"target_id": target_node_to_id[target_node],
+					"target_label": target_labels[target_node],
+				}
+			)
+
+		return {
+			"exists": True,
+			"message": "Homomorphisme trouvé entre q1 et q2.",
+			"mapping": mapping,
+			"highlight_target_ids": list(dict.fromkeys(item["target_id"] for item in mapping)),
+		}
+
+	def find_homomorphism(self, target_tpq: TreePatternQuery) -> dict[str, Any]:
+		"""Alias used by the backend to compare two TreePatternQuery instances."""
+		return self.find_bool_tpq_lab_homomorphism(target_tpq)
 
 	def q(self, tree):
 		# If this TPQ represents a boolean query (BoolTPQ), there are no output nodes.

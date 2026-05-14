@@ -21,6 +21,22 @@ Génère `tpq_visualization.html` avec :
 - **Thème manuel** : Basculez entre `clair`, `sombre` et `auto`, avec mémorisation du choix
 - **Hiérarchie préservée** : La racine reste en haut et chaque `parent` / `ancestor` est toujours au-dessus de ses `child` / `descendant`
 
+### Constructeur graphique de `BoolTPQ_Lab`
+
+Une page dédiée permet de construire deux requêtes booléennes labellisées, sans wildcard, puis de tester un homomorphisme de `q1` vers `q2` :
+
+```powershell
+python main.py --builder
+```
+
+Puis ouvrez la page `/builder` pour :
+- créer des nœuds `child` ou `descendant`
+- renommer les nœuds
+- déplacer les nœuds au glisser-déposer
+- exporter/importer chaque graphe en JSON
+- lancer **Trouver l'homomorphisme** pour afficher un witness de `q1` vers `q2`
+- voir l'homomorphisme se construire dynamiquement sous forme de flèches entre les nœuds liés par `h`
+
 ### Mode statique
 
 Pour une version SVG statique plus légère :

@@ -136,3 +136,47 @@ class TestTreePatternQuery(TestCase):
 		assert wildcard.get_label() == "*"
 		assert {child.get_label() for child in wildcard.get_children()} == {"d", "o1"}
 
+	def test_find_bool_tpq_lab_homomorphism_uses_model_nodes(self):
+		source_root = Qnode("a")
+		source_child = Qnode("c")
+		source_descendant = Qnode("b")
+		source_root.add_child(source_child)
+		source_root.add_descendant(source_descendant)
+		source = TPQ(source_root)
+		source.set_nodes()
+
+		target_root = Qnode("a")
+		target_child = Qnode("c")
+		target_mid = Qnode("x")
+		target_descendant = Qnode("b")
+		target_root.add_child(target_child)
+		target_root.add_descendant(target_mid)
+		target_mid.add_child(target_descendant)
+		target = TPQ(target_root)
+		target.set_nodes()
+
+		result = source.find_bool_tpq_lab_homomorphism(target)
+
+		assert result["exists"] is True
+		assert [item["source_label"] for item in result["mapping"]] == ["a", "c", "b"]
+		assert [item["target_label"] for item in result["mapping"]] == ["a", "c", "b"]
+		assert result["highlight_target_ids"] == ["target_0", "target_1", "target_3"]
+
+	def test_find_bool_tpq_lab_homomorphism_reports_failure(self):
+		source_root = Qnode("a")
+		source_child = Qnode("z")
+		source_root.add_child(source_child)
+		source = TPQ(source_root)
+		source.set_nodes()
+
+		target_root = Qnode("a")
+		target_child = Qnode("c")
+		target_root.add_child(target_child)
+		target = TPQ(target_root)
+		target.set_nodes()
+
+		result = source.find_bool_tpq_lab_homomorphism(target)
+
+		assert result["exists"] is False
+		assert result["mapping"] == []
+

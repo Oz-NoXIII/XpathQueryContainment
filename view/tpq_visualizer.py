@@ -921,7 +921,17 @@ $theme_script
     // Données du graphe (chargées dynamiquement depuis le serveur)
     let nodes = [];
     let edges = [];
+    let nodesById = new Map();
     const initialExpression = {json.dumps(xpath_query or '')};
+
+    function syncGraphState() {{
+      nodes.forEach((node, index) => {{
+        if (!Number.isFinite(node.index)) {{
+          node.index = index;
+        }}
+      }});
+      nodesById = new Map(nodes.map(node => [node.id, node]));
+    }}
 
     async function fetchGraph(expression) {{
       try {{
@@ -937,6 +947,7 @@ $theme_script
         edges.length = 0;
         data.nodes.forEach(n => nodes.push(n));
         data.edges.forEach(e => edges.push(e));
+        syncGraphState();
         const formattedQuery = document.getElementById('xpath-formatted');
         if (formattedQuery && typeof data.formatted_query === 'string') {{
           formattedQuery.textContent = data.formatted_query;
@@ -977,6 +988,10 @@ $theme_script
       settleSpeedThreshold: 0.05,
       settleFrames: 45
     }};
+
+    function getNodeById(nodeId) {{
+      return nodesById.get(nodeId) || null;
+    }}
     
     // Initialiser les positions avec un layout radial initial
     function initializeLayout() {{
@@ -984,7 +999,10 @@ $theme_script
       const levelMap = new Map();
       let maxDepth = 0;
 
-      nodes.forEach(node => {{
+      nodes.forEach((node, index) => {{
+        if (!Number.isFinite(node.index)) {{
+          node.index = index;
+        }}
         const depth = Number.isFinite(node.depth) ? node.depth : 0;
         maxDepth = Math.max(maxDepth, depth);
         if (!levelMap.has(depth)) {{
@@ -1056,8 +1074,9 @@ $theme_script
       
       // Forces d'attraction (arêtes)
       edges.forEach(edge => {{
-        const source = nodes[edge.source];
-        const target = nodes[edge.target];
+        const source = getNodeById(edge.source);
+        const target = getNodeById(edge.target);
+        if (!source || !target) return;
         const dx = target.x - source.x;
         const dy = target.y - source.y;
         const dist = Math.hypot(dx, dy) || 0.1;
@@ -1177,8 +1196,9 @@ $theme_script
         }});
 
         edges.forEach(edge => {{
-          const source = nodes[edge.source];
-          const target = nodes[edge.target];
+          const source = getNodeById(edge.source);
+          const target = getNodeById(edge.target);
+          if (!source || !target) return;
           if (!source.isVisible || !target.isVisible) return;
 
           const minGap = edge.type === 'descendant' ? params.descendantGap : params.childGap;
@@ -1226,8 +1246,9 @@ $theme_script
       
       // Dessiner les arêtes
       edges.forEach(edge => {{
-        const source = nodes[edge.source];
-        const target = nodes[edge.target];
+        const source = getNodeById(edge.source);
+        const target = getNodeById(edge.target);
+        if (!source || !target) return;
         
         if (!source.isVisible || !target.isVisible) return;
         
@@ -1416,6 +1437,7 @@ $theme_script
              edges.length = 0;
              data.nodes.forEach(n => nodes.push(n));
              data.edges.forEach(e => edges.push(e));
+                    syncGraphState();
              const formattedQuery = document.getElementById('xpath-formatted');
              if (formattedQuery && typeof data.formatted_query === 'string') {{
                formattedQuery.textContent = data.formatted_query;
