@@ -280,3 +280,27 @@ class TestExpressionTransformer(TestCase):
         assert tpq.get_output_nodes()[0] is u1
         assert tpq.get_output_nodes()[1] is u2
 
+    def test_transform_with_chained_existential_predicates_on_step(self):
+        expression = "child[(lab = post)][?child[(lab = comment)]][?self[(lab = test)]]"
+
+        tpq = self._transform(expression)
+        root = tpq.get_root()
+
+        assert root.get_label() == "test"
+        assert root.get_descendants() == []
+
+        children = root.get_children()
+        assert len(children) == 2
+        labels = {child.get_label() for child in children}
+        assert labels == {"post", "comment"}
+
+        post_child = next(child for child in children if child.get_label() == "post")
+        comment_child = next(child for child in children if child.get_label() == "comment")
+
+        u1, u2 = tpq.get_output_nodes()
+        assert u1 is root
+        assert u2 is post_child
+        assert root.get_output_roles() == frozenset({"u1"})
+        assert post_child.get_output_roles() == frozenset({"u2"})
+        assert comment_child.get_output_roles() == frozenset()
+

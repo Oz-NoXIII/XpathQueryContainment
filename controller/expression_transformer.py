@@ -87,18 +87,119 @@ class ExpressionTransformer(Transformer):
         raise NotImplementedError("Union 'U' is not supported by the TPQ transformer")
 
     def step(self, args):
+        # Basic axis form: axis/? and a node/predicate
         if len(args) == 2 and isinstance(args[0], str):
             return [args[0], args[1]]
+
+        # If the step is already materialized as a two-element fragment, pass it through
         if len(args) == 1 and isinstance(args[0], list) and len(args[0]) == 2:
             return args[0]
-        raise NotImplementedError("Complex steps are not supported yet")
+
+        # Complex step: support (step)[pred] where predicate may be
+        # a plain QueryNode, a step fragment [axis, node], a PathFragment, or a
+        # wrapped predicate of the form ['?', pe]. The parser calls functions
+        # pairwise, so args will contain at most two elements here: inner and one
+        # predicate.
+        if len(args) == 2:
+            inner = args[0]
+            predicate = args[1]
+
+            # Helper to unwrap predicate wrappers of the form ['?', content]
+            if isinstance(predicate, list) and len(predicate) == 2 and predicate[0] == "?":
+                predicate = predicate[1]
+
+            # Case: inner is a step fragment (axis, node)
+            if isinstance(inner, list) and len(inner) == 2 and isinstance(inner[0], str):
+                inner_fragment = self._materialize_step_fragment(inner)
+                pivot = inner_fragment.root
+                axis, node = inner
+
+                # Merge plain node predicate into the step node
+                if isinstance(predicate, QueryNode):
+                    self._merge_node_content(node, predicate)
+                    return inner_fragment
+
+                # Attach step-like predicate under the same pivot
+                if isinstance(predicate, list) and len(predicate) == 2 and isinstance(predicate[0], str):
+                    pred_axis, pred_node = predicate
+                    self._attach_step(pivot, pred_axis, pred_node)
+                    return inner_fragment
+
+                # Materialize other fragment-like predicates (PathFragment or QueryNode)
+                try:
+                    pred_fragment = self._materialize_fragment(predicate)
+                except Exception:
+                    raise NotImplementedError("Unsupported predicate form in complex step")
+
+                # Detach reused entry node if necessary before attaching
+                if pred_fragment.entry_node.get_parent() is not None:
+                    self._detach_from_parent(pred_fragment.entry_node)
+
+                self._attach_step(pivot, pred_fragment.entry_axis, pred_fragment.entry_node)
+                return inner_fragment
+
+            # Case: inner is a PathFragment (already materialized) with a predicate,
+            # e.g. (pe)[pred]. We attach predicates to the fragment's pivot/root and
+            # merge node predicates into the fragment entry node.
+            if isinstance(inner, PathFragment):
+                inner_fragment = inner
+                pivot = inner_fragment.root
+                node = inner_fragment.entry_node
+
+                if isinstance(predicate, QueryNode):
+                    self._merge_node_content(node, predicate)
+                    return inner_fragment
+
+                if isinstance(predicate, list) and len(predicate) == 2 and isinstance(predicate[0], str):
+                    pred_axis, pred_node = predicate
+                    self._attach_step(pivot, pred_axis, pred_node)
+                    return inner_fragment
+
+                try:
+                    pred_fragment = self._materialize_fragment(predicate)
+                except Exception:
+                    raise NotImplementedError("Unsupported predicate form in complex step")
+
+                if pred_fragment.entry_node.get_parent() is not None:
+                    self._detach_from_parent(pred_fragment.entry_node)
+
+                self._attach_step(pivot, pred_fragment.entry_axis, pred_fragment.entry_node)
+                return inner_fragment
+
+            # Case: inner is a plain QueryNode with a predicate, e.g. (node)[pred]
+            if isinstance(inner, QueryNode):
+                pivot = inner
+
+                if isinstance(predicate, QueryNode):
+                    self._merge_node_content(inner, predicate)
+                    return pivot
+
+                if isinstance(predicate, list) and len(predicate) == 2 and isinstance(predicate[0], str):
+                    axis, step_node = predicate
+                    self._attach_step(inner, axis, step_node)
+                    return pivot
+
+                try:
+                    pred_fragment = self._materialize_fragment(predicate)
+                except Exception:
+                    raise NotImplementedError("Unsupported predicate form in complex step")
+
+                if pred_fragment.entry_node.get_parent() is not None:
+                    self._detach_from_parent(pred_fragment.entry_node)
+
+                self._attach_step(inner, pred_fragment.entry_axis, pred_fragment.entry_node)
+                return pivot
+
+        raise NotImplementedError(f"step error:{args}")
 
 
-    def ne(self, args):
-        """Node expression wrapper with restricted support."""
-        if len(args) != 1:
-            raise NotImplementedError("Complex node expressions are not supported yet")
-        return args[0]
+    @v_args(inline=True)
+    def ne_exist(self, pe):
+        """Node expression wrapper. Wrap a path expression (pe) as an existential
+        predicate of the form ["?", pe]. Using inline args keeps the inner
+        representation simple for downstream handlers.
+        """
+        return ["?", pe]
 
     @v_args(inline=True)
     def lab(self, token):
@@ -127,24 +228,94 @@ class ExpressionTransformer(Transformer):
     def and_(self, args):
         left, right = args
 
-        if isinstance(left, QueryNode) and isinstance(right, QueryNode):
-            return self._merge_node_content(left, right)
+        # Unwrap existential predicate wrapper ['?', content] if present
+        def _unwrap(pred):
+            if isinstance(pred, list) and len(pred) == 2 and pred[0] == "?":
+                return pred[1]
+            return pred
 
-        if isinstance(left, QueryNode) and isinstance(right, list):
-            axis, step_node = right
-            return self._attach_step(left, axis, step_node)
+        left_u = _unwrap(left)
+        right_u = _unwrap(right)
 
-        if isinstance(left, list) and isinstance(right, QueryNode):
-            axis, step_node = left
-            return self._attach_step(right, axis, step_node)
+        # Classify operand into one of: QueryNode, step fragment [axis, node], or PathFragment
+        def _classify(obj):
+            if isinstance(obj, QueryNode):
+                return "node", obj
+            if isinstance(obj, PathFragment):
+                return "fragment", obj
+            if isinstance(obj, list) and len(obj) == 2 and isinstance(obj[0], str):
+                return "step", obj
+            raise SyntaxError("Unsupported operands for AND expression")
 
-        if isinstance(left, list) and isinstance(right, list):
+        left_kind, left_obj = _classify(left_u)
+        right_kind, right_obj = _classify(right_u)
+
+        # node & node => merge
+        if left_kind == "node" and right_kind == "node":
+            return self._merge_node_content(left_obj, right_obj)
+
+        # node & step/fragment => attach predicate under the node pivot
+        if left_kind == "node" and right_kind == "step":
+            axis, step_node = right_obj
+            return self._attach_step(left_obj, axis, step_node)
+
+        if left_kind == "node" and right_kind == "fragment":
+            frag = right_obj
+            if frag.entry_node.get_parent() is not None:
+                self._detach_from_parent(frag.entry_node)
+            self._attach_step(left_obj, frag.entry_axis, frag.entry_node)
+            return left_obj
+
+        # step/fragment & node => attach under node pivot (symmetric)
+        if left_kind == "step" and right_kind == "node":
+            axis, step_node = left_obj
+            return self._attach_step(right_obj, axis, step_node)
+
+        if left_kind == "fragment" and right_kind == "node":
+            frag = left_obj
+            if frag.entry_node.get_parent() is not None:
+                self._detach_from_parent(frag.entry_node)
+            self._attach_step(right_obj, frag.entry_axis, frag.entry_node)
+            return right_obj
+
+        # step & step => attach both under a fresh pivot
+        if left_kind == "step" and right_kind == "step":
             pivot = QueryNode("*")
-            axis_left, node_left = left
-            axis_right, node_right = right
-
+            axis_left, node_left = left_obj
+            axis_right, node_right = right_obj
             self._attach_step(pivot, axis_left, node_left)
             return self._attach_step(pivot, axis_right, node_right)
+
+        # step & fragment or fragment & step => attach both under a fresh pivot
+        if (left_kind == "step" and right_kind == "fragment") or (left_kind == "fragment" and right_kind == "step"):
+            pivot = QueryNode("*")
+            # attach left
+            if left_kind == "step":
+                axis_l, node_l = left_obj
+                self._attach_step(pivot, axis_l, node_l)
+            else:
+                frag_l = left_obj
+                if frag_l.entry_node.get_parent() is not None:
+                    self._detach_from_parent(frag_l.entry_node)
+                self._attach_step(pivot, frag_l.entry_axis, frag_l.entry_node)
+            # attach right
+            if right_kind == "step":
+                axis_r, node_r = right_obj
+                return self._attach_step(pivot, axis_r, node_r)
+            else:
+                frag_r = right_obj
+                if frag_r.entry_node.get_parent() is not None:
+                    self._detach_from_parent(frag_r.entry_node)
+                return self._attach_step(pivot, frag_r.entry_axis, frag_r.entry_node)
+
+        # fragment & fragment => attach both under a fresh pivot
+        if left_kind == "fragment" and right_kind == "fragment":
+            pivot = QueryNode("*")
+            for frag in (left_obj, right_obj):
+                if frag.entry_node.get_parent() is not None:
+                    self._detach_from_parent(frag.entry_node)
+                self._attach_step(pivot, frag.entry_axis, frag.entry_node)
+            return pivot
 
         raise SyntaxError("Unsupported operands for AND expression")
 
@@ -258,6 +429,9 @@ class ExpressionTransformer(Transformer):
     def _attach_step_with_frontier(self, pivot, axis, step_node):
         """Attach one step and return both the fragment root and the new frontier node."""
         root = self._find_root(pivot)
+
+        if axis == "?":
+            pass
 
         if axis == "child":
             pivot.add_child(step_node)

@@ -41,11 +41,20 @@ def main():
 		def build_graph_payload(expression: str, booleanize: bool = False):
 			tree = parser_obj.parse(expression)
 			tpq = transformer.transform(tree)
+			payload = tpq_to_graph_payload(tpq)
+			# Include a suggested layout size so the interactive canvas can be
+			# resized to the graph content and allow page scrolling when needed.
+			visualizer = TreePatternQueryVisualizer(tpq)
+			layout = visualizer.layout()
+			payload["layout"] = {"width": layout.get("width"), "height": layout.get("height")}
+			payload["formatted_query"] = visualizer._format_xpath_query_for_display(expression)
 			if booleanize:
 				tpq = tpq.to_boolean_tpq()
-			payload = tpq_to_graph_payload(tpq)
-			payload["formatted_query"] = TreePatternQueryVisualizer(tpq)._format_xpath_query_for_display(expression)
-			if booleanize:
+				payload = tpq_to_graph_payload(tpq)
+				visualizer = TreePatternQueryVisualizer(tpq)
+				layout = visualizer.layout()
+				payload["layout"] = {"width": layout.get("width"), "height": layout.get("height")}
+				payload["formatted_query"] = visualizer._format_xpath_query_for_display(expression)
 				payload["formatted_query"] += "\n(booléanisé)"
 			return payload
 

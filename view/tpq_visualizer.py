@@ -43,7 +43,9 @@ class TreePatternQueryVisualizer:
 
     def _measure_widths(self, node: QueryNode, cache: dict[QueryNode, float]) -> float:
         label_text = str(node.get_label())
-        own_width = max(self.node_radius * 2 + 16, len(label_text) * 8 + 24)
+        # conservative per-character width estimate (px) to ensure labels fit inside nodes
+        char_w = 10
+        own_width = max(self.node_radius * 2 + 16, len(label_text) * char_w + 24)
 
         outgoing = list(self._iter_outgoing(node))
         if not outgoing:
@@ -58,6 +60,15 @@ class TreePatternQueryVisualizer:
         root = self.tree_pattern_query.get_root()
         widths: dict[QueryNode, float] = {}
         self._measure_widths(root, widths)
+
+        # Compute per-node radius based on label length so labels fit inside the
+        # node circle. Use the configured minimum self.node_radius as a floor.
+        radii: dict[QueryNode, float] = {}
+        for node in widths:
+            label_text = str(node.get_label())
+            char_w = 10
+            label_diameter = len(label_text) * char_w + 24
+            radii[node] = float(max(self.node_radius, label_diameter / 2))
 
         positions: dict[QueryNode, tuple[float, float]] = {}
         edges: list[dict[str, Any]] = []
@@ -106,6 +117,7 @@ class TreePatternQueryVisualizer:
             "root": root,
             "positions": positions,
             "edges": edges,
+            "radii": radii,
             "width": int(max(total_width + self.padding * 2, max_x + self.padding)),
             "height": int(max_y + self.padding * 2),
         }
@@ -115,6 +127,7 @@ class TreePatternQueryVisualizer:
 
     def _shrink_segment(
         self, start: tuple[float, float], end: tuple[float, float]
+    , r_start: float | None = None, r_end: float | None = None
     ) -> tuple[float, float, float, float]:
         x1, y1 = start
         x2, y2 = end
@@ -123,11 +136,13 @@ class TreePatternQueryVisualizer:
         length = hypot(dx, dy) or 1.0
         ux = dx / length
         uy = dy / length
+        r1 = self.node_radius if r_start is None else r_start
+        r2 = self.node_radius if r_end is None else r_end
         return (
-            x1 + ux * self.node_radius,
-            y1 + uy * self.node_radius,
-            x2 - ux * self.node_radius,
-            y2 - uy * self.node_radius,
+            x1 + ux * r1,
+            y1 + uy * r1,
+            x2 - ux * r2,
+            y2 - uy * r2,
         )
 
     def _line_points(self, start: tuple[float, float], end: tuple[float, float], offset: float = 0.0):
@@ -316,13 +331,15 @@ class TreePatternQueryVisualizer:
                      "</defs>",
                      f'<text class="title" x="{self.padding}" y="{self.padding / 2 + 8}">TreePatternQuery</text>']
 
+        radii = layout.get("radii", {})
+
         for edge in layout["edges"]:
             parent = edge["parent"]
             child = edge["child"]
             edge_type = edge["type"]
             start = positions[parent]
             end = positions[child]
-            segment = self._shrink_segment(start, end)
+            segment = self._shrink_segment(start, end, radii.get(parent), radii.get(child))
 
             if edge_type == "child":
                 svg_parts.append(
@@ -348,8 +365,13 @@ class TreePatternQueryVisualizer:
                 roles.append("u2")
             extra_class = " output" if roles else ""
             roles_attr = f' data-output-roles="{','.join(roles)}"' if roles else ''
-            svg_parts.append(f'<circle class="node-circle{extra_class}" cx="{x}" cy="{y}" r="{self.node_radius}"{roles_attr} />')
-            svg_parts.append(f'<text class="node-label" x="{x}" y="{y}">{label}</text>')
+            r = radii.get(node, self.node_radius)
+            svg_parts.append(f'<circle class="node-circle{extra_class}" cx="{x}" cy="{y}" r="{r}"{roles_attr} />')
+            # Ensure the text fits inside the circle by constraining its rendered length.
+            text_length = max(0, int(2 * r - 8))
+            svg_parts.append(
+                f'<text class="node-label" x="{x}" y="{y}" textLength="{text_length}" lengthAdjust="spacingAndGlyphs">{label}</text>'
+            )
 
         legend_y = height - self.padding / 2
         svg_parts.append(
@@ -737,7 +759,7 @@ $theme_script
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background: linear-gradient(135deg, var(--bg-start) 0%, var(--bg-end) 100%);
       color: var(--text);
-      height: 100vh;
+      min-height: 100vh;
       display: flex;
       flex-direction: column;
     }}
@@ -793,7 +815,9 @@ $theme_script
     main {{
       flex: 1;
       position: relative;
-      overflow: hidden;
+      /* Let the document page handle scrolling instead of an inner panel */
+      overflow: visible;
+      padding-bottom: 84px;
     }}
     canvas {{
       display: block;
@@ -805,7 +829,7 @@ $theme_script
       cursor: grabbing;
     }}
     .controls {{
-      position: absolute;
+      position: fixed;
       bottom: 16px;
       right: 16px;
       background: var(--panel-bg);
@@ -813,6 +837,7 @@ $theme_script
       border-radius: 8px;
       padding: 12px 16px;
       box-shadow: 0 4px 12px var(--shadow);
+      z-index: 200;
     }}
     .theme-switch {{
       display: inline-flex;
@@ -917,6 +942,7 @@ $theme_script
       themeColors = getThemeColors();
     }};
     window.refreshThemeColors();
+    // The interactive canvas is always viewport-sized.
     
     // Données du graphe (chargées dynamiquement depuis le serveur)
     let nodes = [];
@@ -933,6 +959,23 @@ $theme_script
       nodesById = new Map(nodes.map(node => [node.id, node]));
     }}
 
+    function computeNodeRadii(nodes) {{
+      try {{
+        const measureCanvas = document.createElement('canvas');
+        const measureCtx = measureCanvas.getContext('2d');
+        measureCtx.font = 'bold 13px Arial';
+        nodes.forEach(n => {{
+          const textWidth = measureCtx.measureText(n.label || '').width || 0;
+          const desired = Math.ceil((textWidth + 24) / 2);
+          n.radius = Math.max(params.nodeRadius, desired);
+        }});
+        const maxRadius = nodes.reduce((m, n) => Math.max(m, n.radius || params.nodeRadius), params.nodeRadius);
+        params.nodeRadius = Math.max(params.nodeRadius, maxRadius);
+      }} catch (e) {{
+        // ignore measurement errors and keep defaults
+      }}
+    }}
+
     async function fetchGraph(expression) {{
       try {{
         const params = new URLSearchParams({{ expression }});
@@ -946,13 +989,25 @@ $theme_script
         nodes.length = 0;
         edges.length = 0;
         data.nodes.forEach(n => nodes.push(n));
-        data.edges.forEach(e => edges.push(e));
-        syncGraphState();
+              data.edges.forEach(e => edges.push(e));
+                     syncGraphState();
+               try {{
+                 computeNodeRadii(nodes);
+               }} catch (e) {{
+                 // ignore
+               }}
         const formattedQuery = document.getElementById('xpath-formatted');
         if (formattedQuery && typeof data.formatted_query === 'string') {{
           formattedQuery.textContent = data.formatted_query;
         }}
         animationState.maxTime = nodes.length * 200;
+        // Compute per-node radii so labels fit inside nodes
+        try {{
+          computeNodeRadii(nodes);
+        }} catch (e) {{
+          // ignore
+        }}
+        resizeCanvas();
         initializeLayout();
         resetAnimation();
         return true;
@@ -982,7 +1037,7 @@ $theme_script
       maxSpeed: 7,
       hierarchyForce: 0.11,
       levelGap: 130,
-      rootPadding: 42,
+      rootPadding: 90,
       childGap: 106,
       descendantGap: 128,
       settleSpeedThreshold: 0.05,
@@ -1012,12 +1067,13 @@ $theme_script
       }});
 
       const availableHeight = Math.max(canvas.height - params.rootPadding * 2, params.levelGap);
-      const levelGap = Math.min(params.levelGap, Math.max(params.nodeRadius * 3, availableHeight / Math.max(1, maxDepth + 1)));
+      const maxNodeRadius = nodes.reduce((m, n) => Math.max(m, (n.radius || params.nodeRadius)), params.nodeRadius);
+      const levelGap = Math.min(params.levelGap, Math.max(maxNodeRadius * 3, availableHeight / Math.max(1, maxDepth + 1)));
 
       [...levelMap.keys()].sort((a, b) => a - b).forEach(depth => {{
         const row = levelMap.get(depth);
         const y = params.rootPadding + depth * levelGap;
-        const spread = Math.max(canvas.width - params.rootPadding * 2, row.length * params.nodeRadius * 3);
+        const spread = Math.max(canvas.width - params.rootPadding * 2, row.length * maxNodeRadius * 3);
         const step = row.length > 1 ? spread / (row.length - 1) : 0;
         const startX = row.length > 1 ? params.rootPadding : centerX;
 
@@ -1037,9 +1093,15 @@ $theme_script
     }}
     
     function resizeCanvas() {{
+      const header = document.querySelector('header');
+      const headerHeight = header ? header.getBoundingClientRect().height : 0;
+      const targetHeight = Math.max(640, window.innerHeight - headerHeight);
+      canvas.style.width = '100%';
+      canvas.style.height = targetHeight + 'px';
+
       const rect = canvas.getBoundingClientRect();
-      canvas.width = rect.width;
-      canvas.height = rect.height;
+      canvas.width = Math.max(1, Math.floor(rect.width));
+      canvas.height = Math.max(1, Math.floor(rect.height));
       initializeLayout();
     }}
     
@@ -1122,7 +1184,7 @@ $theme_script
         node.y += node.vy;
         
         // Limiter aux bords
-        const padding = params.nodeRadius + 10;
+        const padding = (params.nodeRadius || 24) + 10;
         node.x = Math.max(padding, Math.min(canvas.width - padding, node.x));
         node.y = Math.max(padding, Math.min(canvas.height - padding, node.y));
       }});
@@ -1132,7 +1194,8 @@ $theme_script
     }}
 
     function resolveCollisions() {{
-      const minDistance = params.nodeRadius * 2 + params.collisionPadding;
+      // use per-node radii when available for collision resolution
+      const minDistance = null; // computed per-pair below
       const iterations = 2;
 
       for (let k = 0; k < iterations; k++) {{
@@ -1153,8 +1216,10 @@ $theme_script
               dist = Math.hypot(dx, dy) || 0.01;
             }}
 
-            if (dist < minDistance) {{
-              const overlap = (minDistance - dist) / 2;
+            // compute pairwise min distance based on node radii
+            const radiiSum = (a.radius || params.nodeRadius) + (b.radius || params.nodeRadius) + params.collisionPadding;
+            if (dist < radiiSum) {{
+              const overlap = (radiiSum - dist) / 2;
               const ux = dx / dist;
               const uy = dy / dist;
 
@@ -1259,10 +1324,10 @@ $theme_script
         const ux = dx / dist;
         const uy = dy / dist;
         
-        const x1 = source.x + ux * params.nodeRadius;
-        const y1 = source.y + uy * params.nodeRadius;
-        const x2 = target.x - ux * params.nodeRadius;
-        const y2 = target.y - uy * params.nodeRadius;
+        const x1 = source.x + ux * (source.radius || params.nodeRadius);
+        const y1 = source.y + uy * (source.radius || params.nodeRadius);
+        const x2 = target.x - ux * (target.radius || params.nodeRadius);
+        const y2 = target.y - uy * (target.radius || params.nodeRadius);
         
         ctx.strokeStyle = themeColors.edge;
         ctx.lineWidth = 1.5;
@@ -1305,7 +1370,7 @@ $theme_script
         }}
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(node.x, node.y, params.nodeRadius, 0, 2 * Math.PI);
+        ctx.arc(node.x, node.y, node.radius || params.nodeRadius, 0, 2 * Math.PI);
         ctx.fill();
         ctx.stroke();
 
@@ -1321,8 +1386,8 @@ $theme_script
           const badgeRadius = 10;
           let badgeOffset = 0;
           node.roles.forEach((role, i) => {{
-            const bx = node.x + params.nodeRadius * 0.65 + badgeOffset;
-            const by = node.y - params.nodeRadius * 0.65;
+            const bx = node.x + (node.radius || params.nodeRadius) * 0.65 + badgeOffset;
+            const by = node.y - (node.radius || params.nodeRadius) * 0.65;
             const color = role === 'u1' ? '#2e8b57' : '#0b9aa6';
             // circle
             ctx.beginPath();
@@ -1353,7 +1418,7 @@ $theme_script
         if (!node.isVisible) return;
         if (node.depth === 0) return;
         const dist = Math.hypot(x - node.x, y - node.y);
-        if (dist < params.nodeRadius + 5) {{
+        if (dist < (node.radius || params.nodeRadius) + 5) {{
           draggedNode = node;
           node.isDragging = true;
           node.isPinned = true;
