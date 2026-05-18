@@ -163,8 +163,13 @@ class TreePatternQuery:
 	def _node_to_id_map(self, prefix):
 		mapping = {}
 		for index, node in enumerate(self.get_nodes() or self._preorder_nodes()):
+			# Prefer an existing explicit graph_id, otherwise generate one
 			node_id = getattr(node, "graph_id", None)
-			mapping[node] = node_id if isinstance(node_id, str) and node_id else f"{prefix}_{index}"
+			if not isinstance(node_id, str) or not node_id:
+				node_id = f"{prefix}_{index}"
+			# Persist the id on the node so renderers can reuse it
+			setattr(node, "graph_id", node_id)
+			mapping[node] = node_id
 		return mapping
 
 	def find_bool_tpq_lab_homomorphism(self, target_tpq: TreePatternQuery) -> dict[str, Any]:
@@ -195,7 +200,10 @@ class TreePatternQuery:
 			if key in memo:
 				return memo[key]
 
-			if source_labels[source_node] != target_labels[target_node]:
+			# Support wildcard labels: '*' matches any label.
+			slabel = source_labels[source_node]
+			tlabel = target_labels[target_node]
+			if slabel != '*' and tlabel != '*' and slabel != tlabel:
 				memo[key] = False
 				return False
 

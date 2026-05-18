@@ -23,11 +23,24 @@ class ExpressionTransformer(Transformer):
     def transform(self, tree):
         """Transform a Lark parse tree into a TreePatternQuery."""
         result = super().transform(tree)
-        if isinstance(result, PathFragment):
+        # Handle unary root query: ["?", content]
+        if isinstance(result, list) and len(result) == 2 and result[0] == "?":
+            content = result[1]
+            if isinstance(content, PathFragment):
+                node = content.root
+                output_u1 = content.output_u1
+                output_u2 = None  # Unary: no u2
+            else:
+                frag = self._materialize_fragment(content)
+                node = frag.root
+                output_u1 = frag.output_u1
+                output_u2 = None  # Unary: no u2
+        # ...existing code...
+        elif isinstance(result, PathFragment):
             node = result.root
             output_u1 = result.output_u1
             output_u2 = result.output_u2
-        elif isinstance(result, list):
+        elif isinstance(result, list) and not (len(result) == 2 and result[0] == "?"):
             result = self._materialize_step_fragment(result)
             node = result.root
             output_u1 = result.output_u1
@@ -49,6 +62,13 @@ class ExpressionTransformer(Transformer):
     def pe(self, args):
         if isinstance(args, list) and len(args) == 1:
             args = args[0]
+
+        # Handle unary predicate query: ["?", pe] should have output_u2 = None
+        if isinstance(args, list) and len(args) == 2 and args[0] == "?":
+            content = args[1]
+            fragment = self._materialize_fragment(content)
+            # Return a unary fragment with no u2 output
+            return PathFragment(fragment.root, fragment.frontier, fragment.entry_axis, fragment.entry_node, fragment.output_u1, None)
 
         if isinstance(args, PathFragment):
             return args
@@ -78,8 +98,28 @@ class ExpressionTransformer(Transformer):
         )
         # Preserve the original u1 witness node through rewiring; it should keep
         # pointing to the same node object even if that node is moved higher.
+        # However, when the right path involves parent/ancestor axes, the tree root
+        # may change. In such cases, update output_u1 to the new root.
         output_u1 = left_fragment.output_u1
-        return PathFragment(root, frontier, left_fragment.entry_axis, left_fragment.entry_node, output_u1, frontier)
+
+        # If the root changed (e.g., due to parent or ancestor navigation),
+        # and the left output points to a wildcard that was created for the left path,
+        # update output_u1 to point to the new root instead.
+        if right_fragment.entry_axis in ("parent", "ancestor") and root != self._find_root(left_fragment.root):
+            if isinstance(output_u1, QueryNode) and output_u1.get_label() == "*":
+                output_u1 = root
+
+        # Determine the composed fragment's u2 output. Normally u2 follows the
+        # new frontier (the pivot after attachment). However, when the right path
+        # moves the root upward (parent/ancestor), the semantic composition means
+        # the witness nodes (u1 and u2) can coincide on the new root. In that
+        # scenario place u2 on the new root as well so both outputs refer to the
+        # same logical node (e.g., child[...] / parent[...] -> both u1/u2 on parent).
+        output_u2 = frontier
+        if right_fragment.entry_axis in ("parent", "ancestor"):
+            output_u2 = root
+
+        return PathFragment(root, frontier, left_fragment.entry_axis, left_fragment.entry_node, output_u1, output_u2)
 
     @v_args(inline=True)
     def pe_union(self, _left, _right):
@@ -119,10 +159,14 @@ class ExpressionTransformer(Transformer):
                     self._merge_node_content(node, predicate)
                     return inner_fragment
 
-                # Attach step-like predicate under the same pivot
+                # Attach step-like predicate under the step's entry node (the actual
+                # node selected by the inner step), not under the temporary root.
+                # This makes predicates like child[(lab=post)][?child[(lab=comment)]]
+                # attach the comment under the post node (entry node), which is the
+                # expected XPath semantics.
                 if isinstance(predicate, list) and len(predicate) == 2 and isinstance(predicate[0], str):
                     pred_axis, pred_node = predicate
-                    self._attach_step(pivot, pred_axis, pred_node)
+                    self._attach_step(node, pred_axis, pred_node)
                     return inner_fragment
 
                 # Materialize other fragment-like predicates (PathFragment or QueryNode)
@@ -135,7 +179,8 @@ class ExpressionTransformer(Transformer):
                 if pred_fragment.entry_node.get_parent() is not None:
                     self._detach_from_parent(pred_fragment.entry_node)
 
-                self._attach_step(pivot, pred_fragment.entry_axis, pred_fragment.entry_node)
+                # Attach the predicate fragment under the entry node (the step node)
+                self._attach_step(node, pred_fragment.entry_axis, pred_fragment.entry_node)
                 return inner_fragment
 
             # Case: inner is a PathFragment (already materialized) with a predicate,
@@ -391,29 +436,37 @@ class ExpressionTransformer(Transformer):
 
     def _materialize_step_fragment(self, step):
         axis, node = step
+        u2 = True
+        if axis == "?":
+            u2 = False
+            axis, node = node
 
         if axis == "self":
-            return PathFragment(node, node, axis, node, node, node)
+            return PathFragment(node, node, axis, node, node, node if u2 else None)
 
         if axis == "child":
             root = QueryNode("*")
             root.add_child(node)
-            return PathFragment(root, node, axis, node, root, node)
+            return PathFragment(root, node, axis, node, root, node if u2 else None)
 
         if axis == "descendant":
             root = QueryNode("*")
             root.add_descendant(node)
-            return PathFragment(root, node, axis, node, root, node)
+            return PathFragment(root, node, axis, node, root, node if u2 else None)
 
         if axis == "parent":
             placeholder = QueryNode("*")
             node.add_child(placeholder)
-            return PathFragment(node, placeholder, axis, node, node, placeholder)
+            # For parent axis: u1 is the initial unnamed witness (placeholder),
+            # u2 is the parent node we navigate to.
+            return PathFragment(node, placeholder, axis, node, placeholder, node if u2 else None)
 
         if axis == "ancestor":
             placeholder = QueryNode("*")
             node.add_descendant(placeholder)
-            return PathFragment(node, placeholder, axis, node, node, placeholder)
+            # For ancestor axis: u1 is the initial unnamed witness (placeholder),
+            # u2 is the ancestor node we navigate to.
+            return PathFragment(node, placeholder, axis, node, placeholder, node if u2 else None)
 
         raise NotImplementedError(f"Unsupported axis in step fragment: {axis}")
 

@@ -154,6 +154,20 @@ class TestTreePatternQueryVisualizer(TestCase):
 		assert 'data-output-roles="u2"' in svg
 		assert 'data-output-roles="u1,u2"' not in svg
 
+	def test_unary_tpq_does_not_render_u2_badge(self):
+		root = QueryNode("a")
+		tpq = TreePatternQuery(root)
+		tpq.set_output_nodes(root, None)
+		tpq.set_nodes()
+		visualizer = TreePatternQueryVisualizer(tpq)
+
+		svg = visualizer.to_svg()
+
+		assert 'data-output-roles="u1"' in svg
+		assert 'data-output-roles="u2"' not in svg
+		assert 'class="node-badge u2"' not in svg
+		assert '>u2<' not in svg
+
 
 
 

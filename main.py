@@ -7,9 +7,12 @@ import json
 
 from controller.expression_transformer import ExpressionTransformer
 from controller.bool_tpq_lab_homomorphism import find_bool_tpq_lab_homomorphism
+from controller.xpath_containment import analyze_xpath_containment
+from controller.xpath_containment import XPathContainmentAnalyzer
+from controller.xml_tree_homomorphism import XmlTreeHomomorphismAnalyzer, analyze_xpath_against_xml
 from controller.xpath_parser import XPathParser
-from controller.tpq_graph_codec import booleanize_graph_payload, tpq_to_graph_payload
-from view import TreePatternQueryBuilderPage, TreePatternQueryVisualizer
+from controller.tpq_graph_codec import booleanize_graph_payload, graph_payload_to_tpq, tpq_to_graph_payload
+from view import TreePatternQueryBuilderPage, TreePatternQueryVisualizer, XPathContainmentPage, TPQXmlHomomorphismPage
 
 
 DEFAULT_EXPRESSION = (
@@ -24,10 +27,12 @@ def main():
 	parser.add_argument("--static", action="store_true", help="Generate static SVG instead of interactive canvas")
 	parser.add_argument("--serve", action="store_true", help="Start a local web server to interactively edit the XPath")
 	parser.add_argument("--builder", action="store_true", help="Open the graphical TPQ builder page instead of the XPath page")
+	parser.add_argument("--containment", action="store_true", help="Open the XPath containment page")
+	parser.add_argument("--xml-tree", action="store_true", help="Open the TPQ versus XML tree homomorphism page")
 	parser.add_argument("--port", type=int, default=8000, help="Port for the local web server")
 	parser.add_argument("--no-open", action="store_true", help="Do not open the generated HTML file")
 	args = parser.parse_args()
-	if args.builder and not args.serve:
+	if (args.builder or args.containment or args.xml_tree) and not args.serve:
 		args.serve = True
 
 	# If --serve is passed, start a local server that serves an interactive UI
@@ -37,6 +42,10 @@ def main():
 		parser_obj = XPathParser()
 		transformer = ExpressionTransformer()
 		builder_page = TreePatternQueryBuilderPage()
+		containment_page = XPathContainmentPage()
+		xml_page = TPQXmlHomomorphismPage()
+		containment_analyzer = XPathContainmentAnalyzer(parser_obj, transformer)
+		xml_analyzer = XmlTreeHomomorphismAnalyzer(parser_obj, transformer)
 
 		def build_graph_payload(expression: str, booleanize: bool = False):
 			tree = parser_obj.parse(expression)
@@ -92,6 +101,22 @@ def main():
 							self._write(500, str(e), content_type="text/plain")
 						return
 
+					if parsed.path == "/containment":
+						try:
+							html = containment_page.to_html(title="Vérification d'inclusion XPath via homomorphismes")
+							self._write(200, html, content_type="text/html")
+						except Exception as e:
+							self._write(500, str(e), content_type="text/plain")
+						return
+
+					if parsed.path == "/tpq-xml":
+						try:
+							html = xml_page.to_html(title="Homomorphisme TPQ ↔ arbre XML")
+							self._write(200, html, content_type="text/html")
+						except Exception as e:
+							self._write(500, str(e), content_type="text/plain")
+						return
+
 					if parsed.path == "/graph":
 						expr = qs.get("expression", [args.expression])[0]
 						try:
@@ -138,13 +163,97 @@ def main():
 							self._write(400, str(e), content_type="text/plain")
 						return
 
+					if parsed.path == "/containment/analyze":
+						content_length = int(self.headers.get("Content-Length", "0"))
+						try:
+							body = self.rfile.read(content_length).decode("utf-8") if content_length else "{}"
+							payload = json.loads(body)
+							result = analyze_xpath_containment(payload.get("q1", ""), payload.get("q2", ""))
+							self._write(200, json.dumps(result), content_type="application/json")
+						except Exception as e:
+							self._write(400, json.dumps({"contained": False, "message": str(e), "attempts": []}), content_type="application/json")
+						return
+
+					if parsed.path == "/containment/transform":
+						content_length = int(self.headers.get("Content-Length", "0"))
+						try:
+							body = self.rfile.read(content_length).decode("utf-8") if content_length else "{}"
+							payload = json.loads(body)
+							result = containment_analyzer.transform_queries(payload.get("q1", ""), payload.get("q2", ""))
+							self._write(200, json.dumps(result), content_type="application/json")
+						except Exception as e:
+							self._write(400, json.dumps({"message": str(e)}), content_type="application/json")
+						return
+
+					if parsed.path == "/containment/booleanize":
+						content_length = int(self.headers.get("Content-Length", "0"))
+						try:
+							body = self.rfile.read(content_length).decode("utf-8") if content_length else "{}"
+							payload = json.loads(body)
+							result = containment_analyzer.booleanize_queries(payload.get("q1", {}), payload.get("q2", {}))
+							self._write(200, json.dumps(result), content_type="application/json")
+						except Exception as e:
+							self._write(400, json.dumps({"message": str(e)}), content_type="application/json")
+						return
+
+					if parsed.path == "/containment/check":
+						content_length = int(self.headers.get("Content-Length", "0"))
+						try:
+							body = self.rfile.read(content_length).decode("utf-8") if content_length else "{}"
+							payload = json.loads(body)
+							source = payload.get("source", {})
+							target = payload.get("target", {})
+							if payload.get("direction", "forward") == "backward":
+								source, target = target, source
+							source_tpq = graph_payload_to_tpq(source)
+							target_tpq = graph_payload_to_tpq(target)
+							result = containment_analyzer.evaluate_containment(
+								source_tpq,
+								target_tpq,
+								source_name=payload.get("source_name", "q1"),
+								target_name=payload.get("target_name", "q2"),
+							)
+							self._write(200, json.dumps(result), content_type="application/json")
+						except Exception as e:
+							self._write(400, json.dumps({"contained": False, "message": str(e), "attempts": []}), content_type="application/json")
+						return
+
+					if parsed.path == "/tpq-xml/transform":
+						content_length = int(self.headers.get("Content-Length", "0"))
+						try:
+							body = self.rfile.read(content_length).decode("utf-8") if content_length else "{}"
+							payload = json.loads(body)
+							result = xml_analyzer.transform_xpath(payload.get("xpath", ""))
+							self._write(200, json.dumps(result), content_type="application/json")
+						except Exception as e:
+							self._write(400, json.dumps({"message": str(e)}), content_type="application/json")
+						return
+
+					if parsed.path == "/tpq-xml/analyze":
+						content_length = int(self.headers.get("Content-Length", "0"))
+						try:
+							body = self.rfile.read(content_length).decode("utf-8") if content_length else "{}"
+							payload = json.loads(body)
+							result = analyze_xpath_against_xml(payload.get("xpath", ""), payload.get("xml", ""))
+							self._write(200, json.dumps(result), content_type="application/json")
+						except Exception as e:
+							self._write(400, json.dumps({"exists": False, "message": str(e), "mapping": []}), content_type="application/json")
+						return
+
 					self._write(404, "Not found", content_type="text/plain")
 
 			return Handler
 
 		server_address = (host, port)
 		httpd = HTTPServer(server_address, make_handler())  # type: ignore[arg-type]
-		url = f"http://{host}:{port}/builder" if args.builder else f"http://{host}:{port}/?expression={quote(args.expression or '')}"
+		if args.containment:
+			url = f"http://{host}:{port}/containment"
+		elif args.xml_tree:
+			url = f"http://{host}:{port}/tpq-xml"
+		elif args.builder:
+			url = f"http://{host}:{port}/builder"
+		else:
+			url = f"http://{host}:{port}/?expression={quote(args.expression or '')}"
 		print(f"Démarrage du serveur local sur {host}:{port}\nOuvrir {url}")
 		if not args.no_open:
 			webbrowser.open_new_tab(url)

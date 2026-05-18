@@ -88,9 +88,10 @@ class TestExpressionTransformer(TestCase):
             assert len(children) == 1
             assert child.get_label() == "*"
             assert root.get_descendants() == []
-            self._assert_output_nodes(tpq, root, child)
-            assert root.get_output_roles() == frozenset({"u1"})
-            assert child.get_output_roles() == frozenset({"u2"})
+            # For parent axis: u1 is the placeholder (initial witness), u2 is the parent
+            self._assert_output_nodes(tpq, child, root)
+            assert child.get_output_roles() == frozenset({"u1"})
+            assert root.get_output_roles() == frozenset({"u2"})
 
         tpq = self._transform(expressions[3])
         root = tpq.get_root()
@@ -101,9 +102,10 @@ class TestExpressionTransformer(TestCase):
             assert root.get_children() == []
             assert len(descendants) == 1
             assert descendant.get_label() == "*"
-            self._assert_output_nodes(tpq, root, descendant)
-            assert root.get_output_roles() == frozenset({"u1"})
-            assert descendant.get_output_roles() == frozenset({"u2"})
+            # For ancestor axis: u1 is the placeholder (initial witness), u2 is the ancestor
+            self._assert_output_nodes(tpq, descendant, root)
+            assert descendant.get_output_roles() == frozenset({"u1"})
+            assert root.get_output_roles() == frozenset({"u2"})
 
     def test_transform_with_label_predicate(self):
         expressions = [
@@ -227,9 +229,10 @@ class TestExpressionTransformer(TestCase):
         assert len(root.get_children()) == 1
         assert root.get_children()[0].get_label() == "c"
         assert root.get_descendants() == []
-        self._assert_output_nodes(tpq, root, root.get_children()[0])
-        assert root.get_output_roles() == frozenset({"u1"})
-        assert root.get_children()[0].get_output_roles() == frozenset({"u2"})
+        # For child/parent composition: both u1 and u2 should be on the parent (see composition in DBT)
+        self._assert_output_nodes(tpq, root, root)
+        assert root.get_output_roles() == frozenset({"u1", "u2"})
+        assert root.get_children()[0].get_output_roles() == frozenset()
 
     def test_transform_with_path_composition_child_then_child(self):
         expression = "child[(lab = c)]/child[(lab = d)]"

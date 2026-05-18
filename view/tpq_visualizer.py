@@ -311,27 +311,38 @@ class TreePatternQueryVisualizer:
     applyTheme(readStoredTheme(), false);
         """.strip()
 
-    def to_svg(self) -> str:
+    def to_svg(self, compact: bool = False, show_outputs: bool = True) -> str:
         layout = self.layout()
         positions = layout["positions"]
         width = layout["width"]
         height = layout["height"]
-        output_u1, output_u2 = self.tree_pattern_query.get_output_nodes()
+        output_u1 = self.tree_pattern_query.output_u1
+        output_u2 = self.tree_pattern_query.output_u2
 
         svg_parts = [f'<svg id="tpq-svg" xmlns="http://www.w3.org/2000/svg" '
                      f'width="{width}" height="{height}" viewBox="0 0 {width} {height}">', "<defs>", "<style>",
-                     "text { font-family: Arial, Helvetica, sans-serif; font-size: 14px; }",
+                     "text { font-family: Arial, Helvetica, sans-serif; font-size: 13px; }",
                      ".edge { stroke: var(--tpq-edge, #333); stroke-width: 2; stroke-linecap: round; fill: none; }",
                      ".edge.child { stroke-dasharray: none; }", ".edge.descendant { stroke-width: 1.8; }",
                       ".node-circle { fill: var(--tpq-node-fill, #f7fbff); stroke: var(--tpq-node-stroke, #1f4e79); stroke-width: 2; }",
-                      ".node-circle.output { fill: #7ccf7c; }",
-                     ".node-label { fill: var(--tpq-node-label, #102a43); text-anchor: middle; dominant-baseline: middle; }",
-                     ".legend { fill: var(--tpq-legend, #334e68); font-size: 13px; }",
-                     ".title { fill: var(--tpq-title, #102a43); font-size: 18px; font-weight: bold; }", "</style>",
-                     "</defs>",
-                     f'<text class="title" x="{self.padding}" y="{self.padding / 2 + 8}">TreePatternQuery</text>']
+                       ".node-circle.output { fill: var(--tpq-node-output-fill, #7ccf7c); }",
+                      ".node-label { fill: var(--tpq-node-label, #102a43); text-anchor: middle; dominant-baseline: middle; font-weight: bold; }",
+                      ".node-badge-text { fill: var(--tpq-node-output-text, #ffffff); font-size: 10px; text-anchor: middle; dominant-baseline: middle; font-weight: bold; font-family: Arial, Helvetica, sans-serif; }",
+                      ".legend { fill: var(--tpq-legend, #334e68); font-size: 13px; }",
+                       ".title { fill: var(--tpq-title, #102a43); font-size: 18px; font-weight: bold; }",
+                      ".node-badge { stroke: none; }",
+                      ".node-badge.u1 { fill: #2e8b57; }",
+                      ".node-badge.u2 { fill: #0b9aa6; }",
+                      "</style>",
+                      "</defs>"]
+        # When used as a small preview (compact=True) we avoid rendering the
+        # global title and legend so the SVG fits cleanly inside a preview slot.
+        if not compact:
+            svg_parts.append(f'<text class="title" x="{self.padding}" y="{self.padding / 2 + 8}">TreePatternQuery</text>')
 
         radii = layout.get("radii", {})
+        ordered_positions = list(positions.items())
+        node_index_by_node = {node: index for index, (node, _coords) in enumerate(ordered_positions)}
 
         for edge in layout["edges"]:
             parent = edge["parent"]
@@ -340,45 +351,64 @@ class TreePatternQueryVisualizer:
             start = positions[parent]
             end = positions[child]
             segment = self._shrink_segment(start, end, radii.get(parent), radii.get(child))
+            parent_index = node_index_by_node[parent]
+            child_index = node_index_by_node[child]
 
             if edge_type == "child":
                 svg_parts.append(
-                    f'<line class="edge child" x1="{segment[0]}" y1="{segment[1]}" '
+                    f'<line class="edge child" data-edge-type="child" data-source-index="{parent_index}" data-target-index="{child_index}" '
+                    f'x1="{segment[0]}" y1="{segment[1]}" '
                     f'x2="{segment[2]}" y2="{segment[3]}" />'
                 )
             elif edge_type == "descendant":
-                for offset in (-self.descendant_offset, self.descendant_offset):
+                for offset_name, offset in (("negative", -self.descendant_offset), ("positive", self.descendant_offset)):
                     x1, y1, x2, y2 = self._line_points((segment[0], segment[1]), (segment[2], segment[3]), offset)
                     svg_parts.append(
-                        f'<line class="edge descendant" x1="{x1}" y1="{y1}" '
+                        f'<line class="edge descendant" data-edge-type="descendant" data-offset="{offset_name}" data-source-index="{parent_index}" data-target-index="{child_index}" '
+                        f'x1="{x1}" y1="{y1}" '
                         f'x2="{x2}" y2="{y2}" />'
                     )
             else:
                 raise SyntaxError(f"Unsupported edge type for visualization: {edge_type}")
 
-        for node, (x, y) in positions.items():
+        for node_index, (node, (x, y)) in enumerate(ordered_positions):
             label = escape(str(node.get_label()))
             roles = []
-            if node is output_u1:
-                roles.append("u1")
-            if node is output_u2:
-                roles.append("u2")
+            if show_outputs:
+                if node is output_u1:
+                    roles.append("u1")
+                if node is output_u2:
+                    roles.append("u2")
             extra_class = " output" if roles else ""
             roles_attr = f' data-output-roles="{','.join(roles)}"' if roles else ''
             r = radii.get(node, self.node_radius)
-            svg_parts.append(f'<circle class="node-circle{extra_class}" cx="{x}" cy="{y}" r="{r}"{roles_attr} />')
-            # Ensure the text fits inside the circle by constraining its rendered length.
-            text_length = max(0, int(2 * r - 8))
+            root_attr = ' data-root="true"' if node is self.tree_pattern_query.get_root() else ''
+            # Include a stable data-node-id when available (set by TreePatternQuery._node_to_id_map)
+            graph_id = getattr(node, 'graph_id', None)
+            id_attr = f' data-node-id="{graph_id}"' if isinstance(graph_id, str) and graph_id else ''
+            svg_parts.append(f'<circle class="node-circle{extra_class}" data-node-index="{node_index}"{root_attr}{id_attr} cx="{x}" cy="{y}" r="{r}"{roles_attr} />')
             svg_parts.append(
-                f'<text class="node-label" x="{x}" y="{y}" textLength="{text_length}" lengthAdjust="spacingAndGlyphs">{label}</text>'
+                f'<text class="node-label" data-node-index="{node_index}"{root_attr}{id_attr} x="{x}" y="{y}">{label}</text>'
             )
+            # small circular badges for output roles (render as <ellipse> so tests counting <circle> stay stable)
+            if roles:
+                badge_radius = 8
+                badge_offset_base = (r * 0.65) if r else 16
+                for i, role in enumerate(roles):
+                    bx = x + badge_offset_base + i * (badge_radius * 1.8)
+                    by = y - badge_offset_base
+                    role_class = 'u1' if role == 'u1' else 'u2'
+                    svg_parts.append(f'<ellipse class="node-badge {role_class}" data-node-index="{node_index}" cx="{bx}" cy="{by}" rx="{badge_radius}" ry="{badge_radius}" />')
+                    svg_parts.append(f'<text class="node-badge-text" data-node-index="{node_index}" x="{bx}" y="{by}">{role}</text>')
 
-        legend_y = height - self.padding / 2
-        svg_parts.append(
-            f'<text class="legend" x="{self.padding}" y="{legend_y}">'
-            "Ligne simple = relation child/parent · Double ligne = relation descendant/ancestor"
-            "</text>"
-        )
+
+        if not compact:
+            legend_y = height - self.padding / 2
+            svg_parts.append(
+                f'<text class="legend" x="{self.padding}" y="{legend_y}">'
+                "Ligne simple = relation child/parent · Double ligne = relation descendant/ancestor"
+                "</text>"
+            )
         svg_parts.append("</svg>")
         return "\n".join(svg_parts)
 
@@ -620,7 +650,8 @@ $theme_script
         edges_list = []
         nodes_by_id = {}
         node_counter = [0]
-        output_u1, output_u2 = self.tree_pattern_query.get_output_nodes()
+        output_u1 = self.tree_pattern_query.output_u1
+        output_u2 = self.tree_pattern_query.output_u2
 
         def traverse(node: QueryNode, depth: int = 0):
             node_id = id(node)
