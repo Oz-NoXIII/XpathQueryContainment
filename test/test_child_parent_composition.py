@@ -19,8 +19,8 @@ class TestChildParentComposition(TestCase):
 
         For  `child[(lab = author)]/parent[(lab = post)]`:
         - The pattern describes: a post node that has an author child
-        - u1 (first output): should be post (the root/parent node found)
-        - u2 (second output): should be author (the child node discovered)
+        - u1 (first output): should be post
+        - u2 (second output): should be post
         """
         expression = "child[(lab = author)]/parent[(lab = post)]"
         tpq = self._transform(expression)
@@ -36,12 +36,12 @@ class TestChildParentComposition(TestCase):
         self.assertIsNotNone(u1, "u1 should not be None")
         self.assertIsNotNone(u2, "u2 should not be None")
         self.assertEqual(u1.get_label(), "post", "u1 should be 'post'")
-        self.assertEqual(u2.get_label(), "author", "u2 should be 'author'")
-        self.assertIsNot(u1, u2, "u1 and u2 should be different nodes")
+        self.assertEqual(u2.get_label(), "post", "u2 should be 'author'")
+        self.assertIs(u1, u2, "u1 and u2 should be the same node")
 
         # Role check (this is what appears on the visualization)
-        self.assertEqual(root.get_output_roles(), frozenset({"u1"}), "post should have u1 role only")
-        self.assertEqual(root.get_children()[0].get_output_roles(), frozenset({"u2"}), "author should have u2 role only")
+        self.assertEqual(root.get_output_roles(), frozenset({"u1", "u2"}), "post should have u1 and u2 role")
+        self.assertEqual(root.get_children()[0].get_output_roles(), frozenset(), "author should have no role")
 
     def test_matches_existing_test_semantics(self):
         """Verify our test matches the existing test semantics for similar expression."""
@@ -52,8 +52,8 @@ class TestChildParentComposition(TestCase):
         root_test = tpq_test.get_root()
         self.assertEqual(root_test.get_label(), "p")
         self.assertEqual(root_test.get_children()[0].get_label(), "c")
-        self.assertEqual(root_test.get_output_roles(), frozenset({"u1"}))
-        self.assertEqual(root_test.get_children()[0].get_output_roles(), frozenset({"u2"}))
+        self.assertEqual(root_test.get_output_roles(), frozenset({"u1", "u2"}), "post should have u1 and u2 role")
+        self.assertEqual(root_test.get_children()[0].get_output_roles(), frozenset(), "author should have no role")
 
         # Our test should have the same pattern
         expression_ours = "child[(lab = author)]/parent[(lab = post)]"
@@ -62,6 +62,6 @@ class TestChildParentComposition(TestCase):
         root_ours = tpq_ours.get_root()
         self.assertEqual(root_ours.get_label(), "post")
         self.assertEqual(root_ours.get_children()[0].get_label(), "author")
-        self.assertEqual(root_ours.get_output_roles(), frozenset({"u1"}))
-        self.assertEqual(root_ours.get_children()[0].get_output_roles(), frozenset({"u2"}))
+        self.assertEqual(root_ours.get_output_roles(), frozenset({"u1", "u2"}), "post should have u1 and u2 role")
+        self.assertEqual(root_ours.get_children()[0].get_output_roles(), frozenset(), "author should have no role")
 

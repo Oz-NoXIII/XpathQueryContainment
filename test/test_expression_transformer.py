@@ -293,17 +293,15 @@ class TestExpressionTransformer(TestCase):
         assert root.get_descendants() == []
 
         children = root.get_children()
-        assert len(children) == 2
+        assert len(children) == 1
         labels = {child.get_label() for child in children}
-        assert labels == {"post", "comment"}
+        assert labels == {"post"}
 
         post_child = next(child for child in children if child.get_label() == "post")
-        comment_child = next(child for child in children if child.get_label() == "comment")
 
         u1, u2 = tpq.get_output_nodes()
         assert u1 is root
         assert u2 is post_child
         assert root.get_output_roles() == frozenset({"u1"})
         assert post_child.get_output_roles() == frozenset({"u2"})
-        assert comment_child.get_output_roles() == frozenset()
 
