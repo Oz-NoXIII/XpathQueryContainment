@@ -1,5 +1,7 @@
 from argparse import ArgumentParser
+import importlib
 from pathlib import Path
+import threading
 import webbrowser
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, quote
@@ -12,7 +14,8 @@ from controller.xpath_containment import XPathContainmentAnalyzer
 from controller.xml_tree_homomorphism import XmlTreeHomomorphismAnalyzer, analyze_xpath_against_xml
 from controller.xpath_parser import XPathParser
 from controller.tpq_graph_codec import booleanize_graph_payload, graph_payload_to_tpq, tpq_to_graph_payload
-from view import TreePatternQueryBuilderPage, TreePatternQueryVisualizer, XPathContainmentPage, TPQXmlHomomorphismPage
+from view import TreePatternQueryBuilderPage, TreePatternQueryVisualizer, TPQXmlHomomorphismPage
+from view import xpath_containment_page as containment_page_module
 
 
 DEFAULT_EXPRESSION = (
@@ -42,7 +45,6 @@ def main():
 		parser_obj = XPathParser()
 		transformer = ExpressionTransformer()
 		builder_page = TreePatternQueryBuilderPage()
-		containment_page = XPathContainmentPage()
 		xml_page = TPQXmlHomomorphismPage()
 		containment_analyzer = XPathContainmentAnalyzer(parser_obj, transformer)
 		xml_analyzer = XmlTreeHomomorphismAnalyzer(parser_obj, transformer)
@@ -69,9 +71,16 @@ def main():
 
 		def make_handler():
 			class Handler(BaseHTTPRequestHandler):
+				def _fresh_containment_page(self):
+					module = importlib.reload(containment_page_module)
+					return module.XPathContainmentPage()
+
 				def _write(self, status, content, content_type="text/html"):
 					self.send_response(status)
 					self.send_header("Content-Type", f"{content_type}; charset=utf-8")
+					self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+					self.send_header("Pragma", "no-cache")
+					self.send_header("Expires", "0")
 					self.end_headers()
 					if isinstance(content, str):
 						self.wfile.write(content.encode("utf-8"))
@@ -103,6 +112,7 @@ def main():
 
 					if parsed.path == "/containment":
 						try:
+							containment_page = self._fresh_containment_page()
 							html = containment_page.to_html(title="Vérification d'inclusion XPath via homomorphismes")
 							self._write(200, html, content_type="text/html")
 						except Exception as e:
@@ -136,6 +146,14 @@ def main():
 							self._write(500, str(e), content_type="text/plain")
 						return
 
+					if parsed.path == '/containment/progress':
+						pid = qs.get('progress_id', [None])[0]
+						if not pid or not hasattr(self.server, 'progress_store') or pid not in self.server.progress_store:
+							self._write(404, json.dumps({'message': 'unknown progress id'}), content_type='application/json')
+						else:
+							self._write(200, json.dumps(self.server.progress_store[pid]), content_type='application/json')
+						return
+
 					# Not found
 					self._write(404, "Not found", content_type="text/plain")
 
@@ -146,7 +164,8 @@ def main():
 						try:
 							body = self.rfile.read(content_length).decode("utf-8") if content_length else "{}"
 							payload = json.loads(body)
-							result = find_bool_tpq_lab_homomorphism(payload.get("source"), payload.get("target"))
+							# Invert the direction for containment check: to verify if q1 ⊆ q2, we check for a homomorphism q2 → q1
+							result = find_bool_tpq_lab_homomorphism(payload.get("target"), payload.get("source"))
 							self._write(200, json.dumps(result), content_type="application/json")
 						except Exception as e:
 							self._write(400, json.dumps({"exists": False, "message": str(e), "mapping": []}), content_type="application/json")
@@ -205,15 +224,46 @@ def main():
 							target = payload.get("target", {})
 							if payload.get("direction", "forward") == "backward":
 								source, target = target, source
+							# support progress reporting via an optional progress_id
+							progress_id = payload.get('progress_id') or ('p-' + __import__('uuid').uuid4().hex[:8])
+							# initialize a simple progress store on the server
+							if not hasattr(self.server, 'progress_store'):
+								self.server.progress_store = {}
+							self.server.progress_store[progress_id] = { 'attempted': 0, 'total': 0, 'done': False, 'result': None }
 							source_tpq = graph_payload_to_tpq(source)
 							target_tpq = graph_payload_to_tpq(target)
-							result = containment_analyzer.evaluate_containment(
-								source_tpq,
-								target_tpq,
-								source_name=payload.get("source_name", "q1"),
-								target_name=payload.get("target_name", "q2"),
-							)
-							self._write(200, json.dumps(result), content_type="application/json")
+
+							def _progress_callback(attempted, total, lengths):
+								store = self.server.progress_store.get(progress_id)
+								if store is not None:
+									store['attempted'] = attempted
+									store['total'] = total
+
+							def _worker():
+								try:
+									result = containment_analyzer.evaluate_containment(
+										source_tpq,
+										target_tpq,
+										source_name=payload.get("source_name", "q1"),
+										target_name=payload.get("target_name", "q2"),
+										progress_callback=_progress_callback,
+									)
+									result['progress_id'] = progress_id
+									store = self.server.progress_store.get(progress_id)
+									if store is not None:
+										store['result'] = result
+										store['done'] = True
+										store['attempted'] = store.get('attempted', 0)
+										store['total'] = store.get('total', 0) or result.get('size_bound', 0)
+								except Exception as exc:
+									store = self.server.progress_store.get(progress_id)
+									if store is not None:
+										store['result'] = {"contained": False, "message": str(exc), "attempts": []}
+										store['done'] = True
+
+							thread = threading.Thread(target=_worker, daemon=True)
+							thread.start()
+							self._write(200, json.dumps({"progress_id": progress_id, "started": True}), content_type="application/json")
 						except Exception as e:
 							self._write(400, json.dumps({"contained": False, "message": str(e), "attempts": []}), content_type="application/json")
 						return

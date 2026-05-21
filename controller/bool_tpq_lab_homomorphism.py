@@ -45,8 +45,6 @@ def _validate_bool_tpq_lab_payload(payload: Any) -> dict[str, Any]:
 			raise BoolTPQLabPayloadError(f"L'identifiant de nœud '{node_id}' est dupliqué.")
 		seen_ids.add(node_id)
 		label = _require_str(node.get("label"), f"Le nœud '{node_id}' doit avoir un label non vide.")
-		if label == "*":
-			raise BoolTPQLabPayloadError(f"Le nœud '{node_id}' ne peut pas utiliser de wildcard.")
 		roles = node.get("roles")
 		if roles not in (None, []):
 			raise BoolTPQLabPayloadError(f"Le nœud '{node_id}' ne doit pas contenir de rôles dans un BoolTPQ_Lab.")

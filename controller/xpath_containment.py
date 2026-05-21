@@ -36,7 +36,8 @@ class XPathContainmentAnalyzer:
 		payload["layout"] = {"width": layout.get("width"), "height": layout.get("height")}
 		if expression is not None:
 			payload["formatted_query"] = visualizer._format_xpath_query_for_display(expression)
-		return {"payload": payload, "svg": visualizer.to_svg()}
+		# use compact SVG for embedding in canvas slots (no global title/legend)
+		return {"payload": payload, "svg": visualizer.to_svg(compact=True)}
 
 	def transform_queries(self, q1_expression: str, q2_expression: str) -> dict[str, Any]:
 		q1 = self.parse_xpath(q1_expression)
@@ -151,7 +152,7 @@ class XPathContainmentAnalyzer:
 	def _label_compatible(self, left_label: str, right_label: str) -> bool:
 		return left_label == "*" or right_label == "*" or left_label == right_label
 
-	def evaluate_containment(self, source_tpq: TreePatternQuery, target_tpq: TreePatternQuery, *, source_name: str = "q1", target_name: str = "q2") -> dict[str, Any]:
+	def evaluate_containment(self, source_tpq: TreePatternQuery, target_tpq: TreePatternQuery, *, source_name: str = "q1", target_name: str = "q2", progress_callback=None) -> dict[str, Any]:
 		if not isinstance(source_tpq, TreePatternQuery) or not isinstance(target_tpq, TreePatternQuery):
 			raise TypeError("Les deux arguments doivent être des TreePatternQuery.")
 
@@ -165,18 +166,31 @@ class XPathContainmentAnalyzer:
 		counterexample_tree: TreePatternQuery | None = None
 		counterexample_lengths: list[int] | None = None
 
+		# compute total number of combinations efficiently: number of compositions
+		# of k parts with sum between k and k+size_bound equals C(k+size_bound, k)
+		k = len(source_descendants)
+		from math import comb
+		total_combinations = comb(k + size_bound, k) if k >= 0 else 1
+		attempted = 0
+
 		for lengths in self.enumerate_length_combinations(len(source_descendants), size_bound):
+			attempted += 1
+			# build canonical tree for this attempt
 			canonical_tree = self.build_canonical_tree(source_tpq, lengths)
 			homomorphism = self.find_homomorphism(target_tpq, canonical_tree)
-			attempts.append(
-				{
-					"L": list(lengths),
-					"exists": homomorphism["exists"],
-					"message": homomorphism["message"],
-					"canonical_tree_svg": TreePatternQueryVisualizer(canonical_tree).to_svg(),
-					"mapping": homomorphism.get("mapping", []),
-				}
-			)
+			# store only light-weight attempt info (no canonical svg stored to save memory)
+			attempts.append({
+				"L": list(lengths),
+				"exists": homomorphism["exists"],
+				"message": homomorphism["message"],
+				"mapping": homomorphism.get("mapping", []),
+			})
+			# report progress to caller if requested
+			if callable(progress_callback):
+				try:
+					progress_callback(attempted, total_combinations, lengths)
+				except Exception:
+					pass
 			if not homomorphism["exists"]:
 				contained = False
 				counterexample_tree = canonical_tree
@@ -192,9 +206,9 @@ class XPathContainmentAnalyzer:
 			),
 			"size_bound": size_bound,
 			"descendant_count": len(source_descendants),
-			"attempts": attempts,
-			"counterexample_lengths": counterexample_lengths,
-			"counterexample_tree": TreePatternQueryVisualizer(counterexample_tree).to_svg() if counterexample_tree is not None else None,
+						"attempts": attempts,
+						"counterexample_lengths": counterexample_lengths,
+						"counterexample_tree": TreePatternQueryVisualizer(counterexample_tree).to_svg(compact=True) if counterexample_tree is not None else None,
 		}
 
 	def find_homomorphism(self, source_tpq: TreePatternQuery, target_tpq: TreePatternQuery) -> dict[str, Any]:
