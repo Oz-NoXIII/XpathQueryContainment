@@ -67,7 +67,7 @@ class TreePatternQuery:
 			u2.add_output_role("u2")
 
 	def get_output_nodes(self):
-		return self.q(None)
+		return self.output_u1, self.output_u2
 
 	def to_boolean_tpq(self):
 		"""Return a boolean TPQ obtained by attaching sentinel children.
