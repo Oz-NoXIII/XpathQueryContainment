@@ -21,6 +21,7 @@ class QueryNode:
 		self.parent_edge = parent_edge  # "child" or "descendant"
 
 		self.output_node = False
+		self.output_roles = set()
 		self._frozen = False
 
 	def get_label(self):
@@ -81,7 +82,22 @@ class QueryNode:
 		descendant.set_parent_edge(None)
 
 	def is_an_output_node(self):
-		return self.output_node
+		return bool(self.output_roles) or self.output_node
+
+	def add_output_role(self, role):
+		if role not in {"u1", "u2"}:
+			raise ValueError(f"Unsupported output role: {role}")
+		self.output_roles.add(role)
+		self.output_node = True
+
+	def get_output_roles(self):
+		return frozenset(self.output_roles)
+
+	def is_u1_output_node(self):
+		return "u1" in self.output_roles
+
+	def is_u2_output_node(self):
+		return "u2" in self.output_roles
 
 	def __repr__(self):
 		return f"QueryNode({self.label})"

@@ -1,7 +1,7 @@
 // grammar/test.lark
 
 ?start: pe -> pe
-      | "?" pe -> ne
+      | "?" pe -> ne_exist
 
 ?pe: step
    | "(" pe "/" pe ")" -> pe_compose
@@ -12,7 +12,7 @@
 ?step: axis
      | step "[" ne "]"
 
-?ne: "?" pe
+?ne: "?" pe -> ne_exist
    | "(" "lab" "=" LAB ")" -> lab
    | "(" "lab" "=" "*" ")" -> wildcard
    | "(" ne "&" ne ")" -> and_
