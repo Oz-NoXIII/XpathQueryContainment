@@ -424,7 +424,9 @@ class TreePatternQueryVisualizer:
         if interactive:
             return self._to_interactive_html(title, xpath_query=xpath_query)
         else:
-            svg = self.to_svg()
+            # For static (non-interactive) output we render a compact SVG
+            # that does not include the global title nor the legend line.
+            svg = self.to_svg(compact=True)
             query_block = ""
             if xpath_query:
                 escaped_query = escape(self._format_xpath_query_for_display(xpath_query))
